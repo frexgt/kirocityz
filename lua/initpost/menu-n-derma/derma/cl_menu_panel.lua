@@ -126,6 +126,12 @@ local Selects = {
             OpenStandaloneContent(hg.DrawSettings)
         end)
     end},
+    {Title = "Правила", Func = function(luaMenu)
+        luaMenu:Close()
+        timer.Simple(0, function()
+            OpenStandaloneContent(hg.DrawRules)
+        end)
+    end},
     {Title = "Раздевалка", Func = function(luaMenu)
         luaMenu:Close()
         timer.Simple(0, function()
