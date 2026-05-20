@@ -24,3 +24,6 @@ A.Bcc -> 1.000
 - USDT(TRC20): TYgpaZgHQr6qEgemhHzVvV7AQESiyhHpZD
 - BTC(BTC): bc1qa8pk9ag6xa5yav2mvlxkra8xk25lg3htgfqh5w
 - ETH(ERC20)* 0x72AdCCcCEB4E323C64bCF0955A779DD9298E9483
+- 
+#KiroCity
+ is a fork of the ZCity project which offers more features and the mechanic is based on the original but also improves it
