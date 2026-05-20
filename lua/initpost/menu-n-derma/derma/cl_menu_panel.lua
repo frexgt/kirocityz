@@ -1,4 +1,4 @@
-﻿local PANEL = {}
+local PANEL = {}
 local curent_panel 
 local red_select = Color(170,170,170)
 
@@ -163,6 +163,29 @@ surface.CreateFont("ZC_MM_Title", {
 
 local Pluv = Material("pluv/pluvkid.jpg")
 
+local title_grad_white = Color(255, 255, 255)
+local title_grad_gray = Color(90, 90, 95)
+local title_shadow = Color(0, 0, 0, 160)
+
+local function MarkupGradientText(str, font, colStart, colEnd)
+    if str == "" then return "" end
+
+    local out = "<font=" .. font .. ">"
+    local len = #str
+
+    for i = 1, len do
+        local t = len > 1 and (i - 1) / (len - 1) or 0
+        local c = colStart:Lerp(colEnd, t)
+        out = out .. string.format("<colour=%d,%d,%d,%d>%s</colour>", c.r, c.g, c.b, c.a, str:sub(i, i))
+    end
+
+    return out .. "</font>"
+end
+
+local function MarkupShadowText(str, font, col)
+    return "<font=" .. font .. "><colour=" .. col.r .. "," .. col.g .. "," .. col.b .. "," .. col.a .. ">" .. str .. "</colour></font>"
+end
+
 function PANEL:InitializeMarkup()
 	local mapname = game.GetMap()
 	local prefix = string.find(mapname, "_")
@@ -172,15 +195,19 @@ function PANEL:InitializeMarkup()
 	local gm = splasheh[math.random(#splasheh)] .. " | " .. string.NiceName(mapname) 
 
     if hg.PluvTown.Active then
-        local text = "<font=ZC_MM_Title><colour=170,170,170>    City</colour></font>\n<font=ZCity_Tiny><colour=105,105,105>" .. gm .. "</colour></font>"
+        local titleStr = "    City"
+        local text = MarkupGradientText(titleStr, "ZC_MM_Title", title_grad_white, title_grad_gray) .. "\n<font=ZCity_Tiny><colour=140,140,140>" .. gm .. "</colour></font>"
+        local shadow = MarkupShadowText(titleStr, "ZC_MM_Title", title_shadow) .. "\n<font=ZCity_Tiny><colour=0,0,0,0>.</colour></font>"
 
         self.SelectedPluv = table.Random(hg.PluvTown.PluvMats)
 
-        return markup.Parse(text)
+        return markup.Parse(text), markup.Parse(shadow)
     end
 
-    local text = "<font=ZC_MM_Title><colour=170,170,170,255>Kirocity</colour></font>\n<font=ZCity_Tiny><colour=105,105,105>" .. gm .. "</colour></font>"
-    return markup.Parse(text)
+    local titleStr = "Kirocity"
+    local text = MarkupGradientText(titleStr, "ZC_MM_Title", title_grad_white, title_grad_gray) .. "\n<font=ZCity_Tiny><colour=140,140,140>" .. gm .. "</colour></font>"
+    local shadow = MarkupShadowText(titleStr, "ZC_MM_Title", title_shadow) .. "\n<font=ZCity_Tiny><colour=0,0,0,0>.</colour></font>"
+    return markup.Parse(text), markup.Parse(shadow)
 end
 
 local color_red = Color(160,160,160,45)
@@ -213,7 +240,11 @@ function PANEL:Init()
     lDock:SetPos(ScrW() * 0.5 - lDock:GetWide() * 0.5, ScrH() * 0.2)
     lDock:DockPadding(0, ScreenScaleH(85), 0, 0)
     lDock.Paint = function(this, w, h)
-        self.Title:Draw(w * 0.5, 8, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 255, TEXT_ALIGN_CENTER)
+        local cx, cy = w * 0.5, 8
+        if self.TitleShadow then
+            self.TitleShadow:Draw(cx + 2, cy + 2, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 255, TEXT_ALIGN_CENTER)
+        end
+        self.Title:Draw(cx, cy, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, 255, TEXT_ALIGN_CENTER)
     end
 
     self.Buttons = {}
