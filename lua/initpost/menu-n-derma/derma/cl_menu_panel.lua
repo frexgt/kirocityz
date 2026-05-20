@@ -48,10 +48,14 @@ end
 local Selects = {
     {Title = "Играть", Func = function(luaMenu) luaMenu:Close() end},
 	    {Title = "Правила", Func = function(luaMenu,pp) 
+        
         pp:SetSize(ScrW(), ScrH())
         pp:SetPos(0, 0)
         hg.DrawRules(pp) 
-    end},
+luaMenu:Close()
+        timer.Simple(0, function()
+            OpenStandaloneContent(hg.DrawRules)
+        end)
     {Title = "Главное меню", Func = function(luaMenu) gui.ActivateGameUI() luaMenu:Close() end},
     {Title = "Телеграм", Func = function(luaMenu)
         luaMenu:Close()
