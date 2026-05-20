@@ -1,4 +1,4 @@
-﻿--
+--
 hg = hg or {}
 hg.WeaponSelector = hg.WeaponSelector or {}
 local WS = hg.WeaponSelector
