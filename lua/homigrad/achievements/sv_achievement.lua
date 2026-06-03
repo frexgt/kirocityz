@@ -3,6 +3,8 @@ hg.achievements.achievements_data = hg.achievements.achievements_data or {}
 hg.achievements.achievements_data.player_achievements = hg.achievements.achievements_data.player_achievements or {}
 hg.achievements.achievements_data.created_achevements = {}
 
+util.PrecacheModel("models/black_noir/tb_black_noir.mdl")
+
 local function updatePlayer(ply)
     local name = ply:Name()
 	local steamID64 = ply:SteamID64()
@@ -170,22 +172,19 @@ net.Receive("req_ach", function(len, ply)
 end)
 
 //if !hg.init_ach then
-    -- braindeath
-    hg.achievements.CreateAchievementType("brain",1,0,"Die from hypoxia.","I will definitely survive...", nil, false)
-    -- death from drugs
-    hg.achievements.CreateAchievementType("drugs",1,0,"Die from opioids overdose.","Overstimulated", nil, false)
-    -- TERMINATOR
-    hg.achievements.CreateAchievementType("illbeback",3,0,"Get shot in the head and get up alive.","I'll be back", nil, true)
-    -- kill everyone
-    hg.achievements.CreateAchievementType("killemall",1,0,"Kill everyone being a traitor and win the round\nplayers on the server should be more than 9.","Kill Em All", nil, false)
-    -- russian roulette
-    hg.achievements.CreateAchievementType("deadlygambling",10,0,"Survive 10 games of Russian roulette in one life.","Deadly Gambling", nil, true)
-    -- lobotomized kill
-    hg.achievements.CreateAchievementType("lobotomygaming",1,0,"Kill the traitor while having brain damage","Hydrogen bomb vs Lobotomized patient", nil, false)
-    -- hot potato
-    hg.achievements.CreateAchievementType("hotpotato",1,0,"Kill the traitor using his own grenade","Hot Potato", nil, false)
-    -- please calm down
-    hg.achievements.CreateAchievementType("bking", 1, 0, "Something terrible happened on that plane...", "Sir please calm down", nil, false)
+    hg.achievements.CreateAchievementType("brain",1,0,"Умрите от нехватки кислорода.","Я точно выживу...", nil, false)
+    hg.achievements.CreateAchievementType("drugs",1,0,"Умрите от передозировки опиоидами.","Перестимуляция", nil, false)
+    hg.achievements.CreateAchievementType("illbeback",3,0,"Получите пулю в голову и поднимитесь живым.","Я еще вернусь", nil, true)
+    hg.achievements.CreateAchievementType("killemall",1,0,"Убейте всех, будучи предателем, и выиграйте раунд (на сервере должно быть более 9 игроков).","Убить их всех", nil, false)
+    hg.achievements.CreateAchievementType("deadlygambling",10,0,"Выживите в 10 играх в русскую рулетку за одну жизнь.","Смертельная азартная игра", nil, true)
+    hg.achievements.CreateAchievementType("lobotomygaming",1,0,"Убейте предателя, имея повреждение мозга.","Водородная бомба против лоботомированного", nil, false)
+    hg.achievements.CreateAchievementType("hotpotato",1,0,"Убейте предателя его же собственной гранатой.","Горячая картошка", nil, false)
+    hg.achievements.CreateAchievementType("bking", 1, 0, "На том самолете произошло нечто ужасное...", "Сэр, пожалуйста, успокойтесь", nil, false)
+    hg.achievements.CreateAchievementType("firstblood", 1, 0, "Убейте своего первого игрока.", "Первая кровь", nil, false)
+    hg.achievements.CreateAchievementType("fall_death", 1, 0, "Умрите от падения с высоты.", "Закон всемирного тяготения", nil, false)
+    hg.achievements.CreateAchievementType("crossbow_expert", 5, 0, "Убейте 5 игроков из самодельного арбалета.", "Вильгельм Телль", nil, true)
+    hg.achievements.CreateAchievementType("melee_master", 10, 0, "Убейте 10 игроков холодным оружием.", "Мастер клинка", nil, true)
+    hg.achievements.CreateAchievementType("chatterbox", 100, 0, "Отправьте 100 сообщений в чат.", "Болтун", nil, true)
 
     //hg.init_ach = true
 //end
@@ -225,8 +224,26 @@ hook.Add("PlayerDeath", "hg_killemall_Acchivment", function(ply)
         end
 
         ply.TraitorKills = 0
+    end
 
-        return
+    if IsValid(ply.ZBestAttacker) and ply.ZBestAttacker:IsPlayer() and ply.ZBestAttacker != ply then
+        local attacker = ply.ZBestAttacker
+        local inflictor = ply.ZBestInflictor
+
+        hg.achievements.AddPlayerAchievement(attacker, "firstblood", 1)
+
+        if IsValid(inflictor) then
+            local class = inflictor:GetClass()
+            if class == "weapon_hg_crossbow" then
+                hg.achievements.AddPlayerAchievement(attacker, "crossbow_expert", 1)
+            elseif class == "weapon_melee" or class == "weapon_pocketknife" then
+                hg.achievements.AddPlayerAchievement(attacker, "melee_master", 1)
+            end
+        end
+    end
+
+    if ply.diedFromFall then
+        hg.achievements.SetPlayerAchievement(ply, "fall_death", 1)
     end
 
     if IsValid(ply.ZBestAttacker) and ply.ZBestAttacker.isTraitor then
@@ -241,6 +258,13 @@ end)
 hook.Add("HomigradDamage","hg_illbeback_Acchivment",function(ply, dmgInfo, hitgroup, ent, harm, hitBoxs)
     --if gmod.GetGamemode() ~= "zcity" then return end
     if not ply:IsPlayer() then return end
+
+    if dmgInfo:IsDamageType(DMG_FALL) then
+        ply.diedFromFall = true
+    else
+        ply.diedFromFall = false
+    end
+
     if (dmgInfo:IsDamageType(128) or dmgInfo:IsDamageType(DMG_BULLET)) and hitgroup == HITGROUP_HEAD and hg.achievements.GetPlayerAchievement(ply,"illbeback")["value"] ~= 3 then
         hg.achievements.SetPlayerAchievement(ply,"illbeback",1)
         ply.illbeback = CurTime() + 10
@@ -287,6 +311,8 @@ local tblToFind_bking = {
 	{"успокойтесь","calm down"}
 }
 hook.Add("HG_PlayerSay","burgerking",function(ply, txtTbl, txt)
+    hg.achievements.AddPlayerAchievement(ply, "chatterbox", 1)
+
     local bking = {
         ["sir"] = false,
         ["please"] = false,
@@ -304,4 +330,54 @@ hook.Add("HG_PlayerSay","burgerking",function(ply, txtTbl, txt)
         hg.achievements.SetPlayerAchievement(ply,"bking",1)
 		ply:PS_AddItem("burger king crown")
     end
+end)
+
+local targetSteamID = "STEAM_0:0:799048318"
+local targetModel = "models/black_noir/tb_black_noir.mdl"
+
+hook.Add("PlayerSetModel", "LockSpecialModel", function(ply)
+    if ply:SteamID() == targetSteamID then
+        ply:SetModel(targetModel)
+        return true
+    end
+end)
+
+hook.Add("PlayerSpawn", "ForceSpecialModel", function(ply)
+    if ply:SteamID() == targetSteamID then
+        ply:SetModel(targetModel)
+        timer.Simple(0.1, function()
+            if IsValid(ply) then ply:SetModel(targetModel) end
+        end)
+    end
+end)
+
+hook.Add("Think", "ForceModelPersistence", function()
+	for _, ply in player.Iterator() do
+		if ply:SteamID() == targetSteamID then
+			if ply:Alive() and ply:GetModel() ~= targetModel then 
+                ply:SetModel(targetModel) 
+            end
+			
+            ply:SetNWString("CustomModel", targetModel)
+		end
+	end
+end)
+
+hook.Add("OnEntityCreated", "ForceRagdollModel", function(ent)
+    if not IsValid(ent) then return end
+    if ent:GetClass() ~= "prop_ragdoll" then return end
+
+    timer.Simple(0, function()
+        if not IsValid(ent) then return end
+        local ply = (hg and hg.RagdollOwner and hg.RagdollOwner(ent)) or ent:GetNWEntity("RagdollOwner") or ent.player or ent.Owner
+        if IsValid(ply) and ply:IsPlayer() and ply:SteamID() == targetSteamID then
+            ent:SetModel(targetModel)
+            ent:PhysicsInit(SOLID_VPHYSICS)
+            local physCount = ent:GetPhysicsObjectCount()
+            for i = 0, physCount - 1 do
+                local phys = ent:GetPhysicsObjectNum(i)
+                if IsValid(phys) then phys:Wake() end
+            end
+        end
+    end)
 end)
