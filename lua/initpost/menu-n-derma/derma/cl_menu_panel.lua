@@ -26,7 +26,7 @@ local function OpenStandaloneContent(drawFunc)
     panel:SetMouseInputEnabled(true)
     panel:SetKeyboardInputEnabled(true)
     panel:MakePopup()
-
+    -- тут колл насрал
     function panel:OnKeyCodePressed(keyCode)
         if keyCode == KEY_ESCAPE then
             self:Remove()
