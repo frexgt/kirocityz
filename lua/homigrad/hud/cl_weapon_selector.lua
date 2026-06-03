@@ -13,13 +13,295 @@ WS.Show = 0
 WS.Transparent = 0
 WS.LastSelectedSlot = 0
 WS.LastSelectedSlotPos = 0
+WS.Anim = WS.Anim or {}
+WS.Slide = 0
 
 WS.SelectedSlot = 0
 WS.SelectedSlotPos = 0
 
 function WS.DrawText(text, font, posX, posY, color, textAlign)
+
+    local ply = LocalPlayer()
+    local brainDamage = 0
+    if IsValid(ply) and ply.organism and ply.organism.brain then
+        brainDamage = ply.organism.brain
+    end
+    
+
+    if brainDamage > 0.15 then
+        text = WS.GlitchText(text, brainDamage)
+        
+
+        local grayIntensity = 0
+        if brainDamage >= 0.3 then
+            grayIntensity = 1
+        else
+            grayIntensity = math.Clamp((brainDamage - 0.15) / 0.15, 0, 1)
+        end
+        
+        local gray = math.floor(color.r * 0.299 + color.g * 0.587 + color.b * 0.114)
+        color = Color(
+            math.floor(Lerp(grayIntensity, color.r, gray)),
+            math.floor(Lerp(grayIntensity, color.g, gray)),
+            math.floor(Lerp(grayIntensity, color.b, gray)),
+            color.a
+        )
+        
+
+        local glitchIntensity = brainDamage >= 0.3 and 3 or (brainDamage - 0.15) * 2
+        local time = CurTime() * (10 + brainDamage * 30) -- Ускоряем с повреждением
+        local offsetX = math.sin(time + posX * 0.01) * glitchIntensity * (brainDamage >= 0.3 and 20 or 3 + brainDamage * 5)
+        local offsetY = math.cos(time * 1.3 + posY * 0.01) * glitchIntensity * (brainDamage >= 0.3 and 15 or 2 + brainDamage * 4)
+        
+        posX = posX + offsetX
+        posY = posY + offsetY
+        
+
+        local colorChance = brainDamage >= 0.3 and 0.9 or glitchIntensity * (0.3 + brainDamage * 0.4)
+        if math.random() < colorChance then
+            local colorShift = brainDamage >= 0.3 and 255 or 50 + brainDamage * 100
+            color = Color(
+                math.Clamp(color.r + math.random(-colorShift, colorShift), 0, 255),
+                math.Clamp(color.g + math.random(-colorShift, colorShift), 0, 255),
+                math.Clamp(color.b + math.random(-colorShift, colorShift), 0, 255),
+                color.a
+            )
+        end
+        
+
+        local rgbChance = brainDamage >= 0.3 and 1.0 or glitchIntensity * (0.4 + brainDamage * 0.5)
+        if math.random() < rgbChance then
+            local separation = brainDamage >= 0.3 and 12 or 2 + brainDamage * 4
+            local rgbAlpha = WS.Transparent * (brainDamage >= 0.3 and 255 or 100 + brainDamage * 100)
+            draw.DrawText(text, font, posX - separation, posY, ColorAlpha(Color(255, 0, 0), rgbAlpha), textAlign)
+            draw.DrawText(text, font, posX + separation, posY, ColorAlpha(Color(0, 255, 255), rgbAlpha), textAlign)
+        end
+
+        if brainDamage >= 0.3 or (brainDamage > 0.2 and math.random() < (brainDamage - 0.2) * 0.8) then
+            local numCopies = brainDamage >= 0.3 and math.random(5, 12) or math.random(1, 3)
+            for i = 1, numCopies do
+                local copyX = posX + math.random(-30, 30) * (brainDamage >= 0.3 and 2 or brainDamage)
+                local copyY = posY + math.random(-20, 20) * (brainDamage >= 0.3 and 2 or brainDamage)
+                local copyAlpha = WS.Transparent * math.random(50, 180)
+                local gray = math.floor(color.r * 0.299 + color.g * 0.587 + color.b * 0.114)
+                draw.DrawText(text, font, copyX, copyY, ColorAlpha(Color(gray, gray, gray), copyAlpha), textAlign)
+            end
+        end
+    end
+    
     draw.DrawText( text, font, posX + 2, posY + 2, ColorAlpha(color_black,WS.Transparent*255) ,textAlign )
     draw.DrawText( text, font, posX, posY, ColorAlpha(color,WS.Transparent*255) ,textAlign )
+end
+
+function WS.GlitchText(text, brainDamage)
+
+    text = tostring(text or "")
+    
+    if brainDamage < 0.15 then return text end
+    
+
+    local glitchChance = brainDamage >= 0.3 and 1.0 or (brainDamage - 0.15) * 1.2
+    local result = ""
+    local glitchChars = {"█", "▓", "▒", "░", "▄", "▀", "■", "□", "▪", "▫", "◆", "◇", "●", "○", "◘", "◙", "☺", "☻", "♠", "♣", "♥", "♦", "♪", "♫", "☼", "►", "◄", "↕", "‼", "¶", "§", "▬", "↨", "↑", "↓", "→", "←", "∟", "↔", "▲", "▼", "?", "!", "@", "#", "$", "%", "^", "&", "*"}
+    
+
+    if brainDamage >= 0.3 then
+        local aggressiveChars = {"Ж", "Щ", "Ъ", "Ы", "Э", "Ю", "Я", "ё", "ъ", "ь", "ы", "э", "ю", "я", "ѐ", "ё", "ђ", "ѓ", "є", "ѕ", "і", "ї", "ј", "љ", "њ", "ћ", "ќ", "ѝ", "ў", "џ", "ERROR", "NULL", "VOID", "FAIL", "DEAD", "LOST", "GONE", "HELP", "PAIN", "STOP", "BROKEN", "CORRUPT", "DAMAGE", "SYSTEM", "FAILURE"}
+        for _, char in ipairs(aggressiveChars) do
+            table.insert(glitchChars, char)
+        end
+    end
+    
+    for i = 1, #text do
+        local char = text:sub(i, i)
+        
+        if math.random() < glitchChance then
+
+            if math.random() < 0.7 then
+                char = glitchChars[math.random(#glitchChars)]
+            else
+
+                char = ""
+            end
+        elseif math.random() < glitchChance * 0.5 then
+
+            char = char .. char
+            if brainDamage >= 0.3 and math.random() < 0.7 then
+                char = char .. char .. char 
+            end
+        end
+        
+        result = result .. char
+    end
+    
+
+    local endGlitchChance = brainDamage >= 0.3 and 1.0 or glitchChance * (0.6 + brainDamage * 0.4)
+    if math.random() < endGlitchChance then
+        local numChars = brainDamage >= 0.3 and math.random(8, 20) or math.random(1, math.floor(3 + brainDamage * 5))
+        for i = 1, numChars do
+            result = result .. glitchChars[math.random(#glitchChars)]
+        end
+    end
+    
+    if brainDamage >= 0.3 and math.random() < 0.6 then
+        result = ""
+        for i = 1, math.random(8, 15) do
+            result = result .. glitchChars[math.random(#glitchChars)]
+        end
+    end
+    
+    return result
+end
+
+function WS.GetAnimValue(id, target, speed)
+    WS.Anim[id] = LerpFT(speed or 0.18, WS.Anim[id] or 0, target)
+    return WS.Anim[id]
+end
+
+local function EaseOutCubic(t)
+    t = math.Clamp(t, 0, 1)
+    return 1 - (1 - t) ^ 3
+end
+
+
+local SADSALAT_COLORS = {
+    accent    = Color(220, 60, 160),
+    grid      = Color(220, 60, 160),
+    select    = Color(255, 80, 180),
+    gradient  = Color(180, 30, 120),
+}
+
+local sadsalatParticles = {}
+
+local function SpawnSadsalatParticle(x, y, w, h)
+    local t = CurTime()
+
+    local types = {"♥", "♦", "✦", "★", "·", "•", "✿"}
+    table.insert(sadsalatParticles, {
+        x     = x + math.random(0, w),
+        y     = y + h * 0.5,
+        vy    = -math.random(20, 60) * 0.1, 
+        vx    = math.random(-15, 15) * 0.1,
+        alpha = 1,
+        size  = math.random(8, 16),
+        char  = types[math.random(#types)],
+        born  = t,
+        life  = math.random(8, 18) * 0.1,
+        wobble = math.random() * math.pi * 2,
+    })
+end
+
+local function UpdateSadsalatParticles(dt)
+    local t = CurTime()
+    for i = #sadsalatParticles, 1, -1 do
+        local p = sadsalatParticles[i]
+        local age = t - p.born
+        if age > p.life then
+            table.remove(sadsalatParticles, i)
+        else
+            p.x = p.x + p.vx
+            p.y = p.y + p.vy
+            p.alpha = 1 - (age / p.life)
+        end
+    end
+end
+
+local function DrawSadsalatParticles(pinkAnim)
+    if pinkAnim < 0.01 then return end
+    surface.SetFont("HomigradFontSmall")
+    for _, p in ipairs(sadsalatParticles) do
+        local a = math.floor(p.alpha * pinkAnim * 220)
+        if a < 5 then continue end
+        local wobbleX = math.sin(CurTime() * 3 + p.wobble) * 3
+        draw.DrawText(p.char, "HomigradFontSmall", p.x + wobbleX, p.y, Color(255, 120, 200, a), TEXT_ALIGN_CENTER)
+    end
+end
+
+local function DrawAnimatedGrid(x, y, w, h, alpha, grayIntensity, pinkAnim)
+    grayIntensity = grayIntensity or 0
+    pinkAnim = pinkAnim or 0
+    local cell = 18
+    local driftX = (CurTime() * 18) % cell
+    local driftY = (CurTime() * 10) % cell
+    local t = CurTime()
+    local minX, minY = math.floor(x), math.floor(y)
+    local maxX, maxY = math.floor(x + w), math.floor(y + h)
+
+    render.SetScissorRect(minX, minY, maxX, maxY, true)
+
+    local baseLineAlpha = alpha * 0.16
+    local pulse = 0.82 + math.abs(math.sin(t * 2.5)) * 0.18
+    
+    local ply = LocalPlayer()
+    local brainDamage = 0
+    if IsValid(ply) and ply.organism and ply.organism.brain then
+        brainDamage = ply.organism.brain
+    end
+    
+    local gridR, gridG, gridB = 220, 45, 45
+    -- Розовая тема
+    if pinkAnim > 0 then
+        gridR = math.floor(Lerp(pinkAnim, gridR, SADSALAT_COLORS.grid.r))
+        gridG = math.floor(Lerp(pinkAnim, gridG, SADSALAT_COLORS.grid.g))
+        gridB = math.floor(Lerp(pinkAnim, gridB, SADSALAT_COLORS.grid.b))
+    end
+    if grayIntensity > 0 then
+        local gray = math.floor(gridR * 0.299 + gridG * 0.587 + gridB * 0.114)
+        gridR = math.floor(Lerp(grayIntensity, gridR, gray))
+        gridG = math.floor(Lerp(grayIntensity, gridG, gray))
+        gridB = math.floor(Lerp(grayIntensity, gridB, gray))
+    end
+    
+    if brainDamage > 0.15 then
+        local glitchIntensity = (brainDamage - 0.15) * 2
+        
+        if math.random() < glitchIntensity * (0.3 + brainDamage * 0.4) then
+            cell = cell + math.random(-8 - brainDamage * 10, 8 + brainDamage * 10)
+        end
+        
+        if math.random() < glitchIntensity * (0.4 + brainDamage * 0.5) then
+            pulse = pulse + math.random(-0.5 - brainDamage, 0.5 + brainDamage)
+            baseLineAlpha = baseLineAlpha * (1 + math.random(-0.5 - brainDamage, 1 + brainDamage * 2))
+        end
+        
+        local numGlitchLines = math.random(1, math.floor(5 + brainDamage * 10))
+        if math.random() < glitchIntensity * (0.2 + brainDamage * 0.6) then
+            for i = 1, numGlitchLines do
+                local rx = x + math.random(0, w)
+                local ry = y + math.random(0, h)
+                local glitchAlpha = baseLineAlpha * (2 + brainDamage * 3)
+                
+                local glitchR, glitchG, glitchB = 255, math.random(0, 100), math.random(0, 100)
+                if grayIntensity > 0 then
+                    local gray = math.floor(glitchR * 0.299 + glitchG * 0.587 + glitchB * 0.114)
+                    glitchR = math.floor(Lerp(grayIntensity, glitchR, gray))
+                    glitchG = math.floor(Lerp(grayIntensity, glitchG, gray))
+                    glitchB = math.floor(Lerp(grayIntensity, glitchB, gray))
+                end
+                
+                surface.SetDrawColor(glitchR, glitchG, glitchB, glitchAlpha)
+                if math.random() < 0.5 then
+                    surface.DrawRect(rx, y, math.random(1, 3 + brainDamage * 2), h)
+                else
+                    surface.DrawRect(x, ry, w, math.random(1, 3 + brainDamage * 2))
+                end
+            end
+        end
+    end
+
+    for gx = -driftX, w, cell do
+        local lx = x + gx
+        surface.SetDrawColor(gridR, gridG, gridB, baseLineAlpha * pulse)
+        surface.DrawRect(lx, y, 1, h)
+    end
+
+    for gy = -driftY, h, cell do
+        local ly = y + gy
+        surface.SetDrawColor(gridR, gridG, gridB, baseLineAlpha * 0.9 * pulse)
+        surface.DrawRect(x, ly, w, 1)
+    end
+
+    render.SetScissorRect(0, 0, 0, 0, false)
 end
 
 function WS.GetSelectedWeapon()
@@ -46,167 +328,280 @@ function WS.GetWeaponTable( ply )
     return FormatedTable
 end
 
-local fallback_material = Material("vgui/white")
+local scrW, scrH = ScrW(), ScrH()
 
-local function SafeMaterial(path, fallback)
-    local mat = Material(path)
-    if not mat then return fallback end
-    if mat.IsError and mat:IsError() then return fallback end
-    return mat
-end
-
-local gradient_down = SafeMaterial("vgui/gradient-d", fallback_material)
-local gradient_up = SafeMaterial("vgui/gradient-u", fallback_material)
-local gradient_right = SafeMaterial("vgui/gradient-r", gradient_down)
-local gradient_left = SafeMaterial("vgui/gradient-l", gradient_up)
-
-surface.CreateFont("ZC_WS_Slot", {
-    font = "Tahoma",
-    size = 14,
-    weight = 950,
-    antialias = true,
-    extended = true,
-})
-
-surface.CreateFont("ZC_WS_Name", {
-    font = "Tahoma",
-    size = 14,
-    weight = 900,
-    antialias = true,
-    extended = true,
-})
-
-surface.CreateFont("ZC_WS_NameSmall", {
-    font = "Tahoma",
-    size = 12,
-    weight = 800,
-    antialias = true,
-    extended = true,
-})
-
-WS.CardExpand = WS.CardExpand or {}
-
-local function GetFilledSlots(weapons)
-    local slots = {}
-
-    for i = 0, #weapons do
-        local slotTbl = weapons[i]
-        if table.Count(slotTbl) < 1 then continue end
-        slots[#slots + 1] = i
-    end
-
-    return slots
-end
+local AcsentColor = Color(155,0,0)
+local AcsentColorPink = Color(220,60,160)
+local gradient_u = Material("vgui/gradient-d")
 
 function WS.WeaponSelectorDraw( ply )
-    if not IsValid(ply) or not ply:Alive() or GetGlobalBool("RadialInventory", false) then return end
+    if not IsValid( ply ) or not ply:Alive() or GetGlobalBool("RadialInventory", false) then return end
+    local isShown = WS.Show > CurTime()
+    WS.Transparent = LerpFT(0.12, WS.Transparent, isShown and 1 or 0)
 
-    if WS.Show < CurTime() then
+    if not isShown and WS.Transparent < 0.02 then
         WS.SelectedSlot = WS.LastSelectedSlot
         WS.SelectedSlotPos = -1
         return
     end
 
-    local weapons = WS.GetWeaponTable(ply)
-    local selectedWep = WS.GetSelectedWeapon()
-    if not IsValid(selectedWep) then return end
-
-    local filledSlots = GetFilledSlots(weapons)
-    if #filledSlots < 1 then return end
-
-    WS.Transparent = LerpFT(0.22, WS.Transparent, math.min(WS.Show - CurTime(), 1))
-
-    local sw, sh = ScrW(), ScrH()
-    local alpha = math.Clamp(WS.Transparent * 255, 0, 255)
-    local collapsedH = sh * 0.037
-    local expandedH = sh * 0.102
-    local cardW = sw * 0.095
-    local slotGap = sw * 0.006
-    local rowGap = sh * 0.004
-
-    local totalW = #filledSlots * cardW + (#filledSlots - 1) * slotGap
-    local startX = sw * 0.5 - totalW * 0.5
-    local startY = sh * 0.048
-
-        for slotIndex, slotId in ipairs(filledSlots) do
-        local slotTbl = weapons[slotId]
-        local x = startX + (slotIndex - 1) * (cardW + slotGap)
-        local y = startY
-
-        local slotIsSelected = false
-        for id = 0, #slotTbl do
-            local checkWep = slotTbl[id]
-            if IsValid(checkWep) and checkWep == selectedWep then
-                slotIsSelected = true
-                break
-            end
-        end
-
-        local slotNumColor = slotIsSelected and Color(235, 70, 70) or color_white
-        WS.DrawText(slotId + 1, "ZC_WS_Slot", x + cardW * 0.5, startY - sh * 0.024, slotNumColor, TEXT_ALIGN_CENTER)
-
-        for id = 0, #slotTbl do
-            local wep = slotTbl[id]
-            if not IsValid(wep) then continue end
-
-            local isSelected = wep == selectedWep
-            local key = wep:EntIndex()
-
-            WS.CardExpand[key] = LerpFT(0.22, WS.CardExpand[key] or 0, isSelected and 1 or 0)
-
-            local expand = WS.CardExpand[key]
-            local h = Lerp(expand, collapsedH, expandedH)
-
-            local baseColor = isSelected and Color(15, 15, 18, alpha * 0.96) or Color(18, 18, 22, alpha * 0.88)
-            local redAlpha = isSelected and alpha * 0.9 or alpha * 0.56
-
-            surface.SetDrawColor(baseColor)
-            surface.DrawRect(x, y, cardW, h)
-
-            surface.SetMaterial(gradient_right)
-            surface.SetDrawColor(165, 36, 36, redAlpha)
-            surface.DrawTexturedRect(x, y, cardW, h)
-
-            surface.SetMaterial(gradient_left)
-            surface.SetDrawColor(0, 0, 0, alpha * 0.35)
-            surface.DrawTexturedRect(x, y, cardW, h)
-
-            surface.SetMaterial(gradient_down)
-            surface.SetDrawColor(0, 0, 0, alpha * 0.24)
-            surface.DrawTexturedRect(x, y, cardW, h)
-
-            surface.SetMaterial(gradient_up)
-            surface.SetDrawColor(255, 255, 255, alpha * (isSelected and 0.1 or 0.05))
-            surface.DrawTexturedRect(x, y, cardW, h)
-
-            if isSelected then
-                surface.SetDrawColor(255, 84, 84, alpha)
-                surface.DrawOutlinedRect(x, y, cardW, h, 2)
-            else
-                surface.SetDrawColor(42, 42, 46, alpha * 0.95)
-                surface.DrawOutlinedRect(x, y, cardW, h, 1)
-            end
-
-            local weaponName = WS.GetPrintName(wep)
-            if expand < 0.55 then
-                WS.DrawText(weaponName, "ZC_WS_NameSmall", x + cardW * 0.5, y + h * 0.2, color_white, TEXT_ALIGN_CENTER)
-            else
-                WS.DrawText(weaponName, "ZC_WS_Name", x + cardW * 0.5, y + h - 18, color_white, TEXT_ALIGN_CENTER)
-            end
-
-            if isSelected and wep.DrawWeaponSelection then
-                local iconX = x + 8
-                local iconY = y + 12
-                local iconW = cardW - 16
-                local iconH = math.max(h - 34, 18)
-                wep:DrawWeaponSelection(iconX, iconY, iconW, iconH, alpha)
-            end
-
-            y = y + h + rowGap
-        end
+    local brainDamage = 0
+    if ply.organism and ply.organism.brain then
+        brainDamage = ply.organism.brain
     end
+    
+    local grayIntensity = 0
+    if brainDamage >= 0.3 then
+        grayIntensity = 1
+    elseif brainDamage > 0.15 then
+        grayIntensity = math.Clamp((brainDamage - 0.15) / 0.15, 0, 1)
+    end
+
+    local Weapons = WS.GetWeaponTable( ply )
+    local SelectedWep = WS.GetSelectedWeapon()
+    if not IsValid(SelectedWep) then return end
+    WS.Slide = LerpFT(0.1, WS.Slide, EaseOutCubic(WS.Transparent))
+
+
+    local activeWep = ply:GetActiveWeapon()
+    local isSadsalat = IsValid(activeWep) and activeWep:GetClass() == "weapon_sadsalat"
+    local pinkAnim = WS.GetAnimValue("sadsalat_pink", isSadsalat and 1 or 0, 0.08)
+
+ 
+    UpdateSadsalatParticles()
+
+    local function GetThemeColor(r, g, b, pinkR, pinkG, pinkB)
+        local pr = pinkR or SADSALAT_COLORS.accent.r
+        local pg = pinkG or SADSALAT_COLORS.accent.g
+        local pb = pinkB or SADSALAT_COLORS.accent.b
+        return math.floor(Lerp(pinkAnim, r, pr)), math.floor(Lerp(pinkAnim, g, pg)), math.floor(Lerp(pinkAnim, b, pb))
+    end
+    --draw.RoundedBox(0,(scrW / 2)-10,(scrH *0.15),20,20, color_red )
+    local SuperAmmout = 0
+    local AmmoutSlots = 0
+    for i = 0, #Weapons do
+        local slotTbl = Weapons[i]
+        if table.Count(slotTbl) < 1 then continue end
+        AmmoutSlots = AmmoutSlots + 1
+    end
+
+    for i = 0, #Weapons do
+        local slotTbl = Weapons[i]
+        if table.Count(slotTbl) < 1 then continue end
+        local sizeX = scrW*0.1
+        local position = scrW/2 + ( ( SuperAmmout -  (AmmoutSlots/2)) * sizeX )
+        local slotAnim = WS.GetAnimValue("slot_" .. i, WS.Slide, 0.1)
+        local slotOffsetY = (1 - EaseOutCubic(slotAnim)) * (scrH * 0.045)
+        
+        local slotColor = color_white
+        if grayIntensity > 0 then
+            local gray = math.floor(255 * 0.299 + 255 * 0.587 + 255 * 0.114)
+            slotColor = Color(
+                math.floor(Lerp(grayIntensity, 255, gray)),
+                math.floor(Lerp(grayIntensity, 255, gray)),
+                math.floor(Lerp(grayIntensity, 255, gray)),
+                255
+            )
+        end
+        
+        WS.DrawText( i+1, "HomigradFontMedium", position + sizeX/2, scrH*0.02 - slotOffsetY, ColorAlpha(slotColor,WS.Transparent*255) ,TEXT_ALIGN_CENTER )
+        
+        --  draw.RoundedBox(
+        --      1,
+        --      position,
+        --      (scrH *0.01),
+        --      sizeX,
+        --      (scrH *0.02), 
+        --      ColorAlpha(color_black,WS.Transparent*255) 
+        --  )
+        --if slotTbl and table.Count(slotTbl) < 0 then continue end
+        local Ammout = 0
+        local lastPos = 0
+        for Id = 0, #slotTbl do
+            local wepId = Id
+            local wep = slotTbl[wepId]
+            if not wep then continue end
+            --print(wepId,wep)
+            local selectedAnim = WS.GetAnimValue("selected_" .. wep:EntIndex(), SelectedWep == wep and 1 or 0, 0.16)
+            local hoverAnim = WS.GetAnimValue("hover_" .. wep:EntIndex(), SelectedWep == wep and 1 or 0, 0.08)
+            local itemAppear = WS.GetAnimValue("item_" .. wep:EntIndex(), isShown and 1 or 0, 0.11 + (Ammout * 0.01))
+            local easedAppear = EaseOutCubic(itemAppear)
+            local sizeH = Lerp(selectedAnim, scrH * 0.025, scrH * 0.12)
+            local LastSelected = 0
+            if slotTbl[wepId-1] and SelectedWep == slotTbl[wepId-1] then
+                lastPos = (scrH *0.095) 
+            end
+            local boxY = (scrH * 0.025) * (Ammout) + (scrH * 0.05) + lastPos - slotOffsetY + (1 - easedAppear) * (scrH * 0.018)
+            local itemAlpha = WS.Transparent * (0.35 + easedAppear * 0.65)
+            
+            local brainDamage = 0
+            if IsValid(ply) and ply.organism and ply.organism.brain then
+                brainDamage = ply.organism.brain
+            end
+            
+            local glitchOffsetX, glitchOffsetY = 0, 0
+            local glitchSizeX, glitchSizeY = sizeX, sizeH
+            
+            if brainDamage > 0.15 then
+                local glitchIntensity = brainDamage >= 0.3 and 4 or (brainDamage - 0.15) * 2
+                local time = CurTime() * (8 + brainDamage * 25) + wep:EntIndex()
+                
+                local offsetChance = brainDamage >= 0.3 and 1.0 or glitchIntensity * 0.4
+                if math.random() < offsetChance then
+                    local maxOffset = brainDamage >= 0.3 and 35 or glitchIntensity * 6
+                    glitchOffsetX = math.sin(time) * maxOffset
+                    glitchOffsetY = math.cos(time * 1.2) * maxOffset * 0.8
+                end
+                
+                local sizeChance = brainDamage >= 0.3 and 0.8 or glitchIntensity * 0.3
+                if math.random() < sizeChance then
+                    local maxSizeChange = brainDamage >= 0.3 and 40 or glitchIntensity * 10
+                    glitchSizeX = sizeX + math.sin(time * 2) * maxSizeChange
+                    glitchSizeY = sizeH + math.cos(time * 1.5) * maxSizeChange * 0.6
+                end
+                
+                local panelChance = brainDamage >= 0.3 and 0.7 or glitchIntensity * 0.2
+                if math.random() < panelChance then
+                    local numPanels = brainDamage >= 0.3 and math.random(5, 12) or math.random(1, 4)
+                    for g = 1, numPanels do
+                        local gx = position + math.random(-50, 50) * (brainDamage >= 0.3 and 2 or 1)
+                        local gy = boxY + math.random(-25, 25) * (brainDamage >= 0.3 and 2 or 1)
+                        local gw = sizeX + math.random(-60, 60) * (brainDamage >= 0.3 and 2 or 1)
+                        local gh = sizeH + math.random(-30, 30) * (brainDamage >= 0.3 and 2 or 1)
+                        
+                        local glitchR, glitchG, glitchB = 255, math.random(0, 100), math.random(0, 100)
+                        if grayIntensity > 0 then
+                            local gray = math.floor(glitchR * 0.299 + glitchG * 0.587 + glitchB * 0.114)
+                            glitchR = math.floor(Lerp(grayIntensity, glitchR, gray))
+                            glitchG = math.floor(Lerp(grayIntensity, glitchG, gray))
+                            glitchB = math.floor(Lerp(grayIntensity, glitchB, gray))
+                        end
+                        
+                        local glitchAlpha = brainDamage >= 0.3 and itemAlpha * 200 or itemAlpha * 120
+                        draw.RoundedBox(0, gx, gy, gw, gh, ColorAlpha(Color(glitchR, glitchG, glitchB), glitchAlpha))
+                    end
+                end
+            end
+
+            draw.RoundedBox(
+                0,
+                position + glitchOffsetX,
+                boxY + glitchOffsetY,
+                glitchSizeX,
+                glitchSizeY, 
+                ColorAlpha(color_black,itemAlpha * 205) 
+            )
+            draw.RoundedBox(
+                0,
+                position + glitchOffsetX,
+                boxY + glitchOffsetY + glitchSizeY - 2,
+                glitchSizeX,
+                2, 
+                ColorAlpha(color_black,itemAlpha * 205) 
+            )
+            DrawAnimatedGrid(position + 2 + glitchOffsetX, boxY + 2 + glitchOffsetY, glitchSizeX - 4, math.max(glitchSizeY - 4, 4), itemAlpha * 255, grayIntensity, pinkAnim)
+            
+            local gradientR, gradientG, gradientB = GetThemeColor(155, 0, 0, SADSALAT_COLORS.gradient.r, SADSALAT_COLORS.gradient.g, SADSALAT_COLORS.gradient.b)
+            if grayIntensity > 0 then
+                local gray = math.floor(gradientR * 0.299 + gradientG * 0.587 + gradientB * 0.114)
+                gradientR = math.floor(Lerp(grayIntensity, gradientR, gray))
+                gradientG = math.floor(Lerp(grayIntensity, gradientG, gray))
+                gradientB = math.floor(Lerp(grayIntensity, gradientB, gray))
+            end
+            
+            surface.SetDrawColor( gradientR, gradientG, gradientB, itemAlpha * (55 + hoverAnim * 145) )
+            surface.SetMaterial( gradient_u )
+            surface.DrawTexturedRect( position + glitchOffsetX, boxY + glitchOffsetY, glitchSizeX, glitchSizeY )
+            if SelectedWep == wep then
+                local pulse = 0.75 + math.abs(math.sin(CurTime() * 6)) * 0.25
+                
+                local selectR, selectG, selectB = GetThemeColor(255, 45, 45, SADSALAT_COLORS.select.r, SADSALAT_COLORS.select.g, SADSALAT_COLORS.select.b)
+                if grayIntensity > 0 then
+                    local gray = math.floor(selectR * 0.299 + selectG * 0.587 + selectB * 0.114)
+                    selectR = math.floor(Lerp(grayIntensity, selectR, gray))
+                    selectG = math.floor(Lerp(grayIntensity, selectG, gray))
+                    selectB = math.floor(Lerp(grayIntensity, selectB, gray))
+                end
+                
+                surface.SetDrawColor( selectR, selectG, selectB, itemAlpha * (110 + pulse * 85) )
+	            surface.DrawOutlinedRect( position + glitchOffsetX, boxY + glitchOffsetY, glitchSizeX, glitchSizeY, 2 )
+            end
+            local sizeHi = boxY + glitchOffsetY
+            sizeHi = sizeHi + 2.5
+            
+            local weaponTextColor = color_white
+            if grayIntensity > 0 then
+                local gray = math.floor(255 * 0.299 + 255 * 0.587 + 255 * 0.114)
+                weaponTextColor = Color(
+                    math.floor(Lerp(grayIntensity, 255, gray)),
+                    math.floor(Lerp(grayIntensity, 255, gray)),
+                    math.floor(Lerp(grayIntensity, 255, gray)),
+                    255
+                )
+            end
+            
+            WS.DrawText( WS.GetPrintName(wep), "HomigradFontSmall", position + glitchSizeX/2 + glitchOffsetX, sizeHi, ColorAlpha(weaponTextColor,itemAlpha * 255) ,TEXT_ALIGN_CENTER )
+            Ammout = Ammout + 1
+
+      
+            if wep:GetClass() == "weapon_sadsalat" and pinkAnim > 0.01 then
+                local cx = position + glitchOffsetX + glitchSizeX / 2
+                local cy = boxY + glitchOffsetY + glitchSizeY / 2
+                local t = CurTime()
+
+
+                local glowPulse = 0.5 + math.abs(math.sin(t * 3)) * 0.5
+                local glowLayers = 4
+                for g = glowLayers, 1, -1 do
+                    local expand = g * 4 * glowPulse
+                    local glowA = math.floor(pinkAnim * itemAlpha * (40 - g * 8) * glowPulse)
+                    if glowA > 0 then
+                        draw.RoundedBox(4,
+                            position + glitchOffsetX - expand,
+                            boxY + glitchOffsetY - expand,
+                            glitchSizeX + expand * 2,
+                            glitchSizeY + expand * 2,
+                            Color(255, 80, 180, glowA)
+                        )
+                    end
+                end
+
+    
+                local sparkCount = 6
+                for s = 1, sparkCount do
+                    local angle = (t * 1.2 + s / sparkCount * math.pi * 2)
+                    local radius = (glitchSizeX * 0.5 + 8) + math.sin(t * 4 + s) * 4
+                    local sx = cx + math.cos(angle) * radius
+                    local sy = (boxY + glitchOffsetY + glitchSizeY * 0.5) + math.sin(angle) * (glitchSizeY * 0.4)
+                    local sparkA = math.floor(pinkAnim * itemAlpha * (0.5 + math.sin(t * 5 + s) * 0.5) * 200)
+                    if sparkA > 10 then
+                        draw.RoundedBox(2, sx - 2, sy - 2, 4, 4, Color(255, 180, 230, sparkA))
+                    end
+                end
+
+     
+                if math.random() < pinkAnim * 0.15 then
+                    SpawnSadsalatParticle(position + glitchOffsetX, boxY + glitchOffsetY, glitchSizeX, glitchSizeY)
+                end
+
+                -- Розовая полоска снизу панели (как подчёркивание)
+                local lineA = math.floor(pinkAnim * itemAlpha * (150 + math.sin(t * 4) * 80))
+                surface.SetDrawColor(255, 100, 200, lineA)
+                surface.DrawRect(position + glitchOffsetX, boxY + glitchOffsetY + glitchSizeY - 2, glitchSizeX, 2)
+            end
+
+            if SelectedWep == wep and wep.DrawWeaponSelection then
+                wep:DrawWeaponSelection(position + 5 + glitchOffsetX, boxY + (scrH * 0.03) + glitchOffsetY, glitchSizeX - 10, glitchSizeY, itemAlpha * 255)
+            end
+        end
+        SuperAmmout = SuperAmmout + 1
+    end
+
+
+    DrawSadsalatParticles(pinkAnim)
 end
--- Changer
+
+
 local tAcceptKeys = {
     ["slot1"] = 1,
     ["slot2"] = 2,
@@ -379,22 +774,13 @@ hook.Add("HUDShouldDraw", "WeaponSelector_HUDShouldDraw", function(sElementName)
     if tHideElements[sElementName] then return false end
 end)
 
--- РЇ РўРђРљ Р—РђР”РћР›Р‘РђР›РЎРЇ РџР РћРЎРўРћ РЈР‘Р•Р™РўР• РњР•РќРЇ РҐРђРҐРђРҐРђРҐРђРҐРђРҐРђРҐРђРҐРђРҐРђРҐРђРђРҐРђРҐРђРҐРђРҐРђРҐРђРҐРђ
--- РџРћР›Р§РђРЎРђ РЇ РџР«РўРђР›РЎРЇ РЎР”Р•Р›РђРўР¬ РќРћР РњР›РђР¬РќРћР• РџР•Р Р•РљР›Р®Р§Р•РќРР• Р“РћР’РќРђ!!!
--- Р—РђРўРћ РџРћР›РЈР§РР›РћРЎР¬!!!!
--- РЈР­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­Р­
+-- Я ТАК ЗАДОЛБАЛСЯ ПРОСТО УБЕЙТЕ МЕНЯ ХАХАХАХАХАХАХАХАХАХААХАХАХАХАХАХА
+-- ПОЛЧАСА Я ПЫТАЛСЯ СДЕЛАТЬ НОРМЛАЬНОЕ ПЕРЕКЛЮЧЕНИЕ ГОВНА!!!
+-- ЗАТО ПОЛУЧИЛОСЬ!!!!
+-- УЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭЭ
 --[[
     /\_/\
     |_ _|
     |   |__
    /_|_____\ -- IT'S SO OVER
 --]]
-
-
-
-
-
-
-
-
-
