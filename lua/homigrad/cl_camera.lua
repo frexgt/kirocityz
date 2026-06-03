@@ -38,36 +38,6 @@ local IsValid = IsValid
 local hg_fov = ConVarExists("hg_fov") and GetConVar("hg_fov") or CreateClientConVar("hg_fov", "70", true, false, "Change first-person field of view", 75, 100)
 local hg_realismcam = ConVarExists("hg_realismcam") and GetConVar("hg_realismcam") or CreateClientConVar("hg_realismcam", "0", true, false, "Toggle realism first-person camera view", 0, 1)
 local hg_gopro = ConVarExists("hg_gopro") and GetConVar("hg_gopro") or CreateClientConVar("hg_gopro", "0", true, false, "Toggle GoPro-like first-person camera view", 0, 1)
-local hg_bodycam = ConVarExists("hg_bodycam") and GetConVar("hg_bodycam") or CreateClientConVar("hg_bodycam", "0", true, false, "Toggle bodycam view", 0, 1)
-
-local function IsBodycamEnabled()
-	return (hg_bodycam and hg_bodycam:GetBool()) or (hg_gopro and hg_gopro:GetBool())
-end
-
-local function ShouldHideBodycamViewmodel(ply)
-	if not IsBodycamEnabled() then return false end
-	if not IsValid(ply) or ply ~= LocalPlayer() then return false end
-	if not ply:Alive() then return false end
-	if GetViewEntity() ~= ply then return false end
-
-	-- Fake camera path uses different rendering; hiding viewmodel there breaks visibility.
-	if IsValid(follow) then return false end
-	if IsValid(ply.FakeRagdoll) then return false end
-
-	return true
-end
-
-hook.Add("ShouldDrawViewModel", "hg_bodycam_hide_viewmodel", function(vm, ply, weapon)
-	if not ShouldHideBodycamViewmodel(ply) then return end
-
-	return false
-end)
-
-hook.Add("PreDrawViewModel", "hg_bodycam_hide_viewmodel_hard", function(vm, weapon, ply)
-	if not ShouldHideBodycamViewmodel(ply) then return end
-
-	return true
-end)
 
 local oldview = render.GetViewSetup()
 local breathing_amount = 0
@@ -101,91 +71,10 @@ hook.Add("MotionBlur", "Weapon", function(x,y,w,z)
 	if wep.Blur then return wep:Blur(x,y,w,z) end
 end)
 
-local sprintBlurLerp = 0
-local sprintShakeLerp = 0
-local sprintShakeTime = 0
-local sprintBlurMaterial = Material("pp/blurscreen")
-
-local function IsSprintCameraEffectActive(ply)
-	if not IsValid(ply) then return false end
-	if not ply:Alive() then return false end
-	if ply:InVehicle() then return false end
-	if not ply:OnGround() then return false end
-	if ply:Crouching() then return false end
-	if IsValid(ply.FakeRagdoll) then return false end
-
-	if hg and hg.KeyDown then
-		if not hg.KeyDown(ply, IN_SPEED) then return false end
-	elseif not ply:KeyDown(IN_SPEED) then
-		return false
-	end
-
-	return ply:GetVelocity():LengthSqr() > 170 * 170
-end
-
-local function GetSprintBlurTarget(ply)
-	if not IsSprintCameraEffectActive(ply) then return 0 end
-
-	local speed = ply:GetVelocity():Length()
-	local runSpeed = Max(ply:GetRunSpeed(), 1)
-	local startSpeed = runSpeed * 0.42
-	local fullSpeed = runSpeed * 0.82
-
-	return math_Clamp((speed - startSpeed) / Max(fullSpeed - startSpeed, 1), 0, 1)
-end
-
-local function ApplySprintViewShake(ply, view)
-	if not view or not view.angles or not view.origin then return end
-
-	local shakeTarget = GetSprintBlurTarget(ply)
-	local shakeLerpSpeed = shakeTarget > sprintShakeLerp and 0.03 or 0.085
-
-	sprintShakeLerp = LerpFT(shakeLerpSpeed, sprintShakeLerp, shakeTarget)
-	if sprintShakeLerp <= 0.001 then return end
-
-	local speedMul = math_Clamp(ply:GetVelocity():Length() / Max(ply:GetRunSpeed(), 1), 0.45, 1)
-	local shakeStrength = sprintShakeLerp * sprintShakeLerp * (3 - 2 * sprintShakeLerp)
-	sprintShakeTime = sprintShakeTime + FrameTime() * (4.5 + shakeStrength * 2.5 + speedMul)
-
-	local wave1 = math.sin(sprintShakeTime)
-	local wave2 = math.sin(sprintShakeTime * 2.1 + math.pi * 0.25)
-	local amplitude = 0.016 * shakeStrength * speedMul
-	local rollAmplitude = amplitude * 0.08
-
-	local angles = view.angles
-	view.origin = view.origin + angles:Up() * (wave1 * amplitude * 0.06)
-
-	angles[1] = angles[1] + wave1 * amplitude
-	angles[3] = angles[3] + wave2 * rollAmplitude
-end
-
 hook.Add("GetMotionBlurValues", "MotionBlurEffect", function( x, y, w, z)
     local blur = hook_Run("MotionBlur",x,y,w,z)
 	if blur then
 		return blur[1],blur[2],blur[3],blur[4]
-	end
-end)
-
-hook.Add("RenderScreenspaceEffects", "hg_sprint_blur_overlay", function()
-	local ply = IsValid(lply) and lply or LocalPlayer()
-	local blurTarget = GetSprintBlurTarget(ply)
-	local blurLerpSpeed = blurTarget > sprintBlurLerp and 0.035 or 0.09
-
-	sprintBlurLerp = LerpFT(blurLerpSpeed, sprintBlurLerp, blurTarget)
-	if sprintBlurLerp <= 0.01 then return end
-
-	local blurStrength = sprintBlurLerp * sprintBlurLerp * (3 - 2 * sprintBlurLerp)
-	local blurAmount = 0.9 + blurStrength * 2
-	local blurAlpha = 150 * blurStrength
-
-	surface.SetDrawColor(255, 255, 255, blurAlpha)
-	surface.SetMaterial(sprintBlurMaterial)
-
-	for i = 0.33, 1, 0.33 do
-		sprintBlurMaterial:SetFloat("$blur", i * blurAmount)
-		sprintBlurMaterial:Recompute()
-		render.UpdateScreenEffectTexture()
-		surface.DrawTexturedRect(0, 0, ScrW(), ScrH())
 	end
 end)
 
@@ -371,91 +260,38 @@ surface.CreateFont(
 
 hook.Add("HUDPaint", "HUDPaint_DrawABox", function() -- этот код старше вас, не судите строго
 	local lply = LocalPlayer()
-	if lply:Alive() and IsBodycamEnabled() then
+	if lply:Alive() and hg_gopro:GetBool() then
 		local specPly = lply
 		if not specPly:IsValid() then return end
-		local Text = "Bodycam #" .. math.Round(util.SharedRandom(specPly:SteamID(),1000,9999,1),0)
+		local Text = "GoPro #" .. math.Round(util.SharedRandom(specPly:SteamID(),1000,9999,1),0)
 		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905 + 2, ScrH() * 0.035 + 2, Color(0, 0, 0), TEXT_ALIGN_CENTER)
-		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905, ScrH() * 0.035, Color(255, 220, 40), TEXT_ALIGN_CENTER)
-		draw.RoundedBox(0, ScrW() * 0.85, ScrH() * 0.085, 50, 28, Color(255, 220, 40))
-		draw.RoundedBox(0, ScrW() * 0.85 + 58, ScrH() * 0.085, 50, 28, Color(18, 18, 18))
-		draw.RoundedBox(0, ScrW() * 0.85 + 58 * 2, ScrH() * 0.085, 50, 28, Color(255, 220, 40))
-		draw.RoundedBox(0, ScrW() * 0.85 + 58 * 3, ScrH() * 0.085, 50, 28, Color(18, 18, 18))
+		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905, ScrH() * 0.035, Color(255, 255, 255), TEXT_ALIGN_CENTER)
+		draw.RoundedBox(0, ScrW() * 0.85, ScrH() * 0.085, 50, 28, Color(0, 173, 255))
+		draw.RoundedBox(0, ScrW() * 0.85 + 58, ScrH() * 0.085, 50, 28, Color(0, 173, 255))
+		draw.RoundedBox(0, ScrW() * 0.85 + 58 * 2, ScrH() * 0.085, 50, 28, Color(0, 70, 103))
+		draw.RoundedBox(0, ScrW() * 0.85 + 58 * 3, ScrH() * 0.085, 50, 28, color_white)
 		Text = specPly:GetName()
 		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905 + 2, ScrH() * 0.11 + 2, Color(0, 0, 0), TEXT_ALIGN_CENTER)
-		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905, ScrH() * 0.11, Color(255, 220, 40), TEXT_ALIGN_CENTER)
+		draw.DrawText(Text, "BODYCAMFONT", ScrW() * 0.905, ScrH() * 0.11, Color(255, 255, 255), TEXT_ALIGN_CENTER)
 		DrawBloom(0.8, 1, 9, 9, 1, 1.2, 0.8, 0.8, 1.2)
 		DrawSharpen(0.2, 1.2)
 	end
 end)
 
 function SpecCam(ply, vec, ang, fov, znear, zfar)
-	if not IsValid(ply) then return end
-	if ply.Alive and not ply:Alive() then return end
-
-	local eyesAttachment = ply.LookupAttachment and ply:LookupAttachment("eyes")
-	local eye = eyesAttachment and eyesAttachment > 0 and ply:GetAttachment(eyesAttachment) or nil
-
-	local chestPos = nil
-	local chestAttachment = ply.LookupAttachment and ply:LookupAttachment("anim_attachment_chest")
-	if chestAttachment and chestAttachment > 0 then
-		local chest = ply:GetAttachment(chestAttachment)
-		if chest and chest.Pos and chest.Pos ~= vector_origin then
-			chestPos = chest.Pos
-		end
-	end
-
-	local spineBone = (ply.LookupBone and ply:LookupBone("ValveBiped.Bip01_Spine2")) or (ply.LookupBone and ply:LookupBone("ValveBiped.Bip01_Spine1"))
-	if spineBone then
-		local bonePos = ply:GetBonePosition(spineBone)
-		if bonePos and bonePos ~= vector_origin then
-			chestPos = bonePos
-		end
-	end
-
-	local shoulderPos = nil
-	local shoulderBone = ply.LookupBone and ply:LookupBone("ValveBiped.Bip01_R_Clavicle")
-	if shoulderBone then
-		local bonePos = ply:GetBonePosition(shoulderBone)
-		if bonePos and bonePos ~= vector_origin then
-			shoulderPos = bonePos
-		end
-	end
-
-	local baseAng = eye and eye.Ang or (ply.EyeAngles and ply:EyeAngles()) or angle_zero
-
-	if not eye then
-		local eyePos = (ply.EyePos and ply:EyePos()) or ply:GetPos()
-		local fallbackPos = shoulderPos or chestPos or (eyePos + baseAng:Up() * -10)
-		return {
-			origin = fallbackPos + baseAng:Forward() * -1 + baseAng:Right() * 7 + baseAng:Up() * 3.5,
-			angles = baseAng,
-			fov = 106,
-			drawviewer = true,
-			znear = 1.6
-		}
-	end
-
-	local ang1 = baseAng
-	local basePos = shoulderPos or chestPos or (eye.Pos + eye.Ang:Up() * -10)
-	local desiredPos = basePos + ang1:Forward() * -1 + ang1:Right() * 7 + ang1:Up() * 3.5
-	local trace = util.TraceHull({
-		start = basePos,
-		endpos = desiredPos,
-		mins = Vector(-2, -2, -2),
-		maxs = Vector(2, 2, 2),
-		filter = ply,
-		mask = MASK_SOLID
-	})
-
-	local org1 = trace.Hit and (trace.HitPos - ang1:Right() * 0.5) or desiredPos
+	if !ply:Alive() then return end
+	--local hand = ply:GetAttachment(ply:LookupAttachment("anim_attachment_rh"))
+	local eye = ply:GetAttachment(ply:LookupAttachment("eyes"))
+	--local org = eye.Pos
+	local ang1 = eye.Ang + Angle(5, 2, 0)
+	local org1 = eye.Pos + eye.Ang:Up() * 6 + eye.Ang:Forward() * -3 + eye.Ang:Right() * 6.5
 
 	local view = {
 		origin = org1,
 		angles = ang1,
-		fov = 106,
+		fov = 110,
 		drawviewer = true,
-		znear = 1.6
+		znear = 0.7
 	}
 
 	return view
@@ -668,7 +504,7 @@ CalcView = function(ply, origin, angles, fov, znear, zfar)
 	realangle = realangle or lply:EyeAngles()
 
 	if GetCoolCameraBool() then
-		view.angles = realangle + GetViewPunchAngles() * 0.2 + vpang
+		view.angles = realangle + GetViewPunchAngles() * 0.4 + vpang
 		view.angles[3] = view.angles[3] - GetViewPunchAngles4()[3]
 		angles = view.angles
 	end
@@ -681,7 +517,7 @@ CalcView = function(ply, origin, angles, fov, znear, zfar)
 		view.angles = FPersPos.Ang
 		return view
 	end--]]
-	if IsBodycamEnabled() then
+	if hg_gopro:GetBool() then
 		local vpangs = GetAllViewPunchAngles()
 		local anglegopro = Angle(0, vpangs[1], -vpangs[2]) * 1--Angle(vpangs[2], -vpangs[1], vpangs[3])
 		anglegopro[2] = anglegopro[2] + math.sin(CurTime() * 2) * math.cos(CurTime() * 1) * 2
@@ -699,7 +535,6 @@ CalcView = function(ply, origin, angles, fov, znear, zfar)
 		
 		view.angles:Add(-vpang)
 		view.angles[3] = view.angles[3] + GetViewPunchAngles4()[3]
-		ApplySprintViewShake(ply, view)
 		hook_Run("PostHGCalcView", ply, view)
 		return view
 	end
@@ -709,10 +544,13 @@ CalcView = function(ply, origin, angles, fov, znear, zfar)
 
 	view.angles:Add(-vpang)
 	view.angles[3] = view.angles[3] + GetViewPunchAngles4()[3]
-	ApplySprintViewShake(ply, view)
 
 	wep = ply:GetActiveWeapon()
 	if IsValid(wep) and whitelist[wep:GetClass()] then return end
+	result = hook_Run("PostPostHGCalcView", ply, view)
+	if result then
+		return result
+	end
 
 	return view
 end
