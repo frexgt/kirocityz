@@ -6,6 +6,18 @@ if not ConVarExists("hg_newspectate") then
     CreateClientConVar("hg_newspectate", "1", true, false, "Enables smooth spectator camera transitions", 0, 1)
 end
 
+local function GetTextChars(text)
+    local chars = {}
+    if utf8 then
+        for _, code in utf8.codes(text) do
+            chars[#chars + 1] = utf8.char(code)
+        end
+    else
+        for i = 1, #text do chars[#chars + i] = text:sub(i, i) end
+    end
+    return chars
+end
+
 function CurrentRound()
 	return zb.modes[zb.CROUND]
 end
@@ -118,6 +130,259 @@ hook.Add("HUDPaint","FUCKINGSAMENAMEUSEDINHOOKFUCKME",function()
 	local w, h = surface.GetTextSize(txt)
 	surface.SetTextPos(ScrW() / 2 - w / 2, ScrH() / 8 * 7 + h)
 	surface.DrawText(txt)
+end)
+
+local function GetSpectatorMarkerEntity(ply)
+	if not IsValid(ply) then return end
+
+	local ent = (hg.GetCurrentCharacter and hg.GetCurrentCharacter(ply)) or ply
+	if IsValid(ent) then
+		return ent
+	end
+
+	return ply
+end
+
+local function GetSpectatorMarkerPos(ent)
+	if not IsValid(ent) then return end
+
+	local mins = ent:OBBMins()
+	if mins then
+		return ent:LocalToWorld(Vector(0, 0, mins.z))
+	end
+
+	return ent:GetPos()
+end
+
+local function GetSpectatorMarkerOrganism(ply, ent)
+	if istable(ply.new_organism) and (ply.new_organism.owner or ply.new_organism.blood or ply.new_organism.pulse or ply.new_organism.otrub ~= nil) then
+		return ply.new_organism
+	end
+
+	if IsValid(ent) and istable(ent.new_organism) and (ent.new_organism.owner or ent.new_organism.blood or ent.new_organism.pulse or ent.new_organism.otrub ~= nil) then
+		return ent.new_organism
+	end
+
+	if istable(ply.organism) and (ply.organism.owner or ply.organism.blood or ply.organism.pulse or ply.organism.otrub ~= nil) then
+		return ply.organism
+	end
+
+	if IsValid(ent) and istable(ent.organism) and (ent.organism.owner or ent.organism.blood or ent.organism.pulse or ent.organism.otrub ~= nil) then
+		return ent.organism
+	end
+end
+
+local function GetSpectatorMarkerName(ply, ent)
+	local model = ""
+
+	if IsValid(ent) and ent.GetModel then
+		model = string.lower(ent:GetModel() or "")
+	end
+
+	if model == "" and IsValid(ply) and ply.GetModel then
+		model = string.lower(ply:GetModel() or "")
+	end
+
+	if string.find(model, "nosacz.mdl", 1, true) and zb.CROUND == "kingkong" then
+		return "Кинг Конг"
+	end
+
+	if ply.role and isstring(ply.role.name) then
+		if ply.role.name == "Кинг Конг" then
+			return "Кинг Конг"
+		end
+	end
+
+	return (ply.GetPlayerName and ply:GetPlayerName()) or ply:Name()
+end
+
+local function GetSpectatorMarkerState(ply, ent)
+	local org = GetSpectatorMarkerOrganism(ply, ent)
+	local fallbackHealth = math.max(ply:Health(), 0)
+
+	if not org then
+		return "НЕИЗВЕСТНО", "данные не получены", Color(190, 190, 190), math.Clamp(fallbackHealth, 0, 100), math.Clamp(fallbackHealth, 0, 100)
+	end
+
+	local blood = math.max(math.Round(org.blood or 5000), 0)
+	local pulse = math.max(math.Round(org.heartbeat or org.pulse or 0), 0)
+	local pain = math.max(math.Round(org.pain or 0), 0)
+	local hurt = math.Clamp(org.hurt or 0, 0, 1)
+	local rawHealth = math.max(math.Round(org.health or fallbackHealth), 0)
+	local bloodHealth = math.Clamp(math.Round(blood / 50), 0, 100)
+	local hurtHealth = math.Clamp(math.Round((1 - hurt) * 100), 0, 100)
+	local health = math.Clamp(math.min(rawHealth, bloodHealth, hurtHealth), 0, 100)
+	local details = string.format("Кровь %d  Пульс %d", blood, pulse)
+
+	if org.heartstop or pulse <= 0 then
+		return "ОСТАНОВКА", details, Color(220, 70, 70), health, health
+	end
+
+	if org.otrub or org.incapacitated then
+		return "БЕЗ СОЗНАНИЯ", details, Color(255, 170, 90), health, health
+	end
+
+	if org.critical or blood <= 2600 or health <= 20 then
+		return "ПРИ СМЕРТИ", details, Color(225, 90, 90), health, health
+	end
+
+	if blood <= 3400 or health <= 45 or pain >= 85 then
+		return "ТЯЖЕЛОЕ", details, Color(235, 180, 80), health, health
+	end
+
+	if blood <= 4300 or health <= 80 or pain >= 35 then
+		return "РАНЕН", details, Color(210, 220, 120), health, health
+	end
+
+	return "СТАБИЛЕН", details, Color(120, 220, 120), health, health
+end
+
+local function GetSpectatorMarkerHealthColor(health)
+	health = math.Clamp(health or 0, 0, 100)
+
+	if health <= 20 then
+		return Color(215, 70, 70)
+	elseif health <= 45 then
+		return Color(230, 155, 75)
+	elseif health <= 75 then
+		return Color(205, 215, 95)
+	end
+
+	return Color(110, 215, 120)
+end
+
+local function ClampSpectatorMarker(x, y, margin, sw, sh)
+	local cx, cy = sw * 0.5, sh * 0.5
+	local visible = x > margin and x < (sw - margin) and y > margin and y < (sh - margin)
+
+	if visible then
+		return x, y, true
+	end
+
+	local dx = x - cx
+	local dy = y - cy
+
+	if dx == 0 and dy == 0 then
+		dx = 1
+	end
+
+	local scale = math.max(
+		math.abs(dx) / math.max(cx - margin, 1),
+		math.abs(dy) / math.max(cy - margin, 1),
+		1
+	)
+
+	return cx + dx / scale, cy + dy / scale, false
+end
+
+local zbSpectatorMarkersEnabled = true
+local zbSpectatorMarkersAltDown = false
+local mat_gradient = Material("vgui/gradient-d")
+
+hook.Add("Think", "ZB_SpectatorPlayerMarkersToggle", function()
+	local altDown = input.IsKeyDown(KEY_LALT) or input.IsKeyDown(KEY_RALT)
+
+	if altDown and not zbSpectatorMarkersAltDown then
+		zbSpectatorMarkersEnabled = not zbSpectatorMarkersEnabled
+	end
+
+	zbSpectatorMarkersAltDown = altDown
+end)
+
+hook.Add("HUDPaint", "ZB_SpectatorPlayerMarkers", function()
+	local lp = LocalPlayer()
+
+	local clr_bg = Color(10, 10, 19, 235)
+	local clr_accent = Color(165, 165, 165)
+
+	if not IsValid(lp) or lp:Alive() then return end
+	if lp:GetObserverMode() == OBS_MODE_NONE and not IsValid(lp:GetNWEntity("spect")) then return end
+	if not zbSpectatorMarkersEnabled then return end
+
+	local sw, sh = ScrW(), ScrH()
+	local margin = ScreenScale(16)
+	local padX = ScreenScale(6)
+	local padY = ScreenScale(5)
+
+	for _, ply in player.Iterator() do
+		if not IsValid(ply) or ply == lp then continue end
+		if ply:Team() == TEAM_SPECTATOR then continue end
+		if not ply:Alive() then continue end
+
+		local ent = GetSpectatorMarkerEntity(ply)
+		local worldPos = GetSpectatorMarkerPos(ent)
+		if not worldPos then continue end
+
+		local scr = worldPos:ToScreen()
+		local posX, posY, onScreen = ClampSpectatorMarker(scr.x, scr.y, margin, sw, sh)
+		if not onScreen then continue end
+		local playerColor = ply:GetPlayerColor():ToColor()
+		local nameText = GetSpectatorMarkerName(ply, ent)
+		local stateText, detailsText, stateColor, health, hpNumber = GetSpectatorMarkerState(ply, ent)
+		local healthColor = GetSpectatorMarkerHealthColor(health)
+		local barH = math.max(ScreenScale(1), 4)
+		local hpText = tostring(math.Clamp(math.Round(hpNumber or health), 0, 100))
+		posY = posY + ScreenScale(8)
+
+		surface.SetFont("HomigradFontSmall")
+		local nameW, nameH = surface.GetTextSize(nameText)
+		surface.SetFont("HomigradFontSmall")
+		local hpW, hpH = surface.GetTextSize(hpText)
+		local stateW, stateH = 0, 0 
+
+		local boxW = math.max(ScreenScale(45), nameW + hpW + 28)
+		local boxH = nameH + stateH + barH + 10
+		local boxX = posX - boxW * 0.5
+		local boxY = posY - boxH * 0.5
+
+		draw.RoundedBox(0, boxX, boxY, boxW, boxH, clr_bg)
+		surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 80)
+		surface.DrawOutlinedRect(boxX, boxY, boxW, boxH, 1)
+
+		surface.SetDrawColor(playerColor)
+		surface.DrawRect(boxX, boxY, 2, boxH)
+		surface.SetMaterial(Material("vgui/gradient-d"))
+		surface.SetDrawColor(0, 0, 0, 120)
+		surface.DrawTexturedRect(boxX, boxY, 2, boxH)
+
+		local nameX = boxX + 10
+		local nameY = boxY + 4
+		local hpX = boxX + boxW - 8
+		local hpY = boxY + 4
+		local barX = boxX + 10
+		local barY = boxY + boxH - 8
+		local barW = boxW - 18
+
+		local t = RealTime() * 4
+		local chars = GetTextChars(nameText)
+		local cx = nameX
+		surface.SetFont("HomigradFontSmall")
+		for i, char in ipairs(chars) do
+			local cw = surface.GetTextSize(char)
+			local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+			local col = Color(140, 140, 145):Lerp(Color(255, 255, 255), shimmer)
+			draw.SimpleText(char, "HomigradFontSmall", cx + 1, nameY + 1, Color(0, 0, 0, 150), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+			draw.SimpleText(char, "HomigradFontSmall", cx, nameY, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+			cx = cx + cw
+		end
+
+		-- draw.SimpleText(stateText, "HomigradFontVSmall", nameX, nameY + nameH - 4, Color(160, 160, 165, 180), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP) -- Убрали текст состояния
+
+		draw.SimpleText(hpText, "HomigradFontSmall", hpX + 1, hpY + 1, Color(0, 0, 0, 210), TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+		draw.SimpleText(hpText, "HomigradFontSmall", hpX, hpY, healthColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_TOP)
+
+		draw.RoundedBox(0, barX, barY, barW, barH, Color(30, 30, 35, 150))
+		
+		local fillW = math.max(2, barW * (health / 100))
+		surface.SetDrawColor(healthColor)
+		surface.DrawRect(barX, barY, fillW, barH)
+		surface.SetMaterial(Material("vgui/gradient-l"))
+		surface.SetDrawColor(128, 128, 128, 50)
+		surface.DrawTexturedRect(barX, barY, fillW, barH)
+
+		surface.SetDrawColor(255, 255, 255, 10)
+		surface.DrawOutlinedRect(barX, barY, barW, barH, 1)
+	end
 end)
 
 hook.Add("HG_CalcView", "zzzzzzzUwU", function(ply, pos, angles, fov)
@@ -421,12 +686,15 @@ hook.Add("InitPostEntity", "furryhuy", function()
 end)
 
 local colGray = Color(122,122,122,255)
-local colBlue = Color(130,10,10)
-local colBlueUp = Color(160,30,30)
+local colBlue = Color(70,70,70,255)
+local colBlueUp = Color(92,92,92,255)
 local col = Color(255,255,255,255)
 
-local colSpect1 = Color(75,75,75,255)
-local colSpect2 = Color(85,85,85,255)
+local colSpect1 = Color(60,60,60,255)
+local colSpect2 = Color(80,80,80,255)
+
+local scoreOutline = Color(135,135,135,180)
+local scoreOutlineActive = Color(190,190,190,220)
 
 local colorBG = Color(55,55,55,255)
 local colorBGBlacky = Color(40,40,40,255)
@@ -464,7 +732,7 @@ local function OpenPlayerSoundSettings(selfa, ply)
 
 	function volumeSlider:Paint(w,h)
 		draw.RoundedBox( 0, 0, 0, w, h, Color( 0, 0, 0 ) )
-		draw.RoundedBox( 0, 0, 0, w*self:GetSlideX(), h, Color( 255, 0, 0 ) )
+		draw.RoundedBox( 0, 0, 0, w*self:GetSlideX(), h, Color( 120, 120, 120 ) )
 		draw.DrawText( ( math.Round( 100*self:GetSlideX(), 0 ) ).."%", "DermaDefault", w/2, h/4, color_white, TEXT_ALIGN_CENTER )
 	end
 	function volumeSlider.Knob.Paint(self) end
@@ -504,6 +772,115 @@ hook.Add("Player_Death", "fixSpectatorVoiceEffect", function(ply)
 	end
 end)
 
+local function GetScoreboardPrivilegeTag(ply)
+	if not IsValid(ply) then return "user" end
+	if ply:IsBot() then return "bot" end
+	if not ply.GetUserGroup then return "user" end
+
+	local group = tostring(ply:GetUserGroup() or "")
+	if group == "" then
+		group = "user"
+	end
+
+	return string.lower(group)
+end
+
+local function GetTextChars(text)
+    local chars = {}
+    if utf8 then
+        for _, code in utf8.codes(text) do
+            chars[#chars + 1] = utf8.char(code)
+        end
+    else
+        for i = 1, #text do chars[#chars + i] = text:sub(i, i) end
+    end
+    return chars
+end
+
+function hg.Query(text, title, btn1Text, btn1Func, btn2Text, btn2Func)
+    local frame = vgui.Create("DFrame")
+    local w, h = ScreenScale(160), ScreenScale(65)
+    frame:SetSize(w, h)
+    frame:Center()
+    frame:SetTitle("")
+    frame:MakePopup()
+    frame:ShowCloseButton(false)
+
+    -- Анимация появления: смещение вниз и прозрачность
+    local targetY = frame:GetY()
+    frame:SetPos(frame:GetX(), targetY + ScreenScale(15))
+    frame:SetAlpha(0)
+    
+    frame:AlphaTo(255, 0.2, 0)
+    frame:MoveTo(frame:GetX(), targetY, 0.25, 0, 0.4)
+
+    local clr_bg = Color(10, 10, 19, 245)
+    local clr_accent = Color(140, 140, 145)
+    local clr_text = Color(225, 225, 225)
+
+    frame.Paint = function(self, w, h)
+        draw.RoundedBox(0, 0, 0, w, h, clr_bg)
+        hg.DrawBlur(self, 5)
+
+        local gridSize = ScreenScale(20)
+        local gridTime = RealTime() * 12
+        local offset = gridTime % gridSize
+
+        surface.SetDrawColor(200, 200, 200, 8)
+        for i = -1, math.ceil(w / gridSize) + 1 do
+            surface.DrawRect(i * gridSize - offset, 0, 1, h)
+        end
+        for i = -1, math.ceil(h / gridSize) + 1 do
+            surface.DrawRect(0, i * gridSize + offset, w, 1)
+        end
+
+        surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 120)
+        surface.DrawOutlinedRect(0, 0, w, h, 2)
+
+        local titleText = string.upper(title or "ВНИМАНИЕ")
+        local t = RealTime() * 4
+        local chars = GetTextChars(titleText)
+        local cx = 10
+        surface.SetFont("ZB_InterfaceMedium")
+        for i, char in ipairs(chars) do
+            local cw = surface.GetTextSize(char)
+            local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+            local col = Color(140, 140, 145):Lerp(Color(255, 255, 255), shimmer)
+            draw.SimpleText(char, "ZB_InterfaceMedium", cx, 8, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            cx = cx + cw
+        end
+
+        draw.DrawText(text, "ZB_InterfaceSmall", w / 2, h * 0.42, clr_text, TEXT_ALIGN_CENTER)
+    end
+
+    local function CreateBtn(name, x, y, w, h, func)
+        local btn = vgui.Create("DButton", frame)
+        btn:SetSize(w, h)
+        btn:SetPos(x, y)
+        btn:SetText("")
+        btn.HoverLerp = 0
+        btn.Paint = function(s, w, h)
+            s.HoverLerp = LerpFT(0.1, s.HoverLerp, s:IsHovered() and 1 or 0)
+            local v = s.HoverLerp
+            draw.RoundedBox(0, 0, 0, w, h, Color(25, 25, 30, 150 + v * 50))
+            surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 30 + v * 120)
+            surface.DrawOutlinedRect(0, 0, w, h, 1)
+            draw.SimpleText(string.upper(name), "ZB_InterfaceSmall", w / 2, h / 2, clr_text, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        btn.DoClick = function()
+            frame:AlphaTo(0, 0.15, 0, function()
+                if IsValid(frame) then frame:Remove() end
+            end)
+            if func then func() end
+            surface.PlaySound("shitty/tap_depress.wav")
+        end
+    end
+
+    local bw, bh = frame:GetWide() * 0.42, ScreenScale(14)
+    CreateBtn(btn1Text or "OK", frame:GetWide() * 0.05, frame:GetTall() - bh - 10, bw, bh, btn1Func)
+    CreateBtn(btn2Text or "CANCEL", frame:GetWide() * 0.53, frame:GetTall() - bh - 10, bw, bh, btn2Func)
+end
+
 function GM:ScoreboardShow()
 	if IsValid(scoreBoardMenu) then
 		scoreBoardMenu:Remove()
@@ -521,6 +898,40 @@ function GM:ScoreboardShow()
 	scoreBoardMenu:SetKeyboardInputEnabled( false )
 	scoreBoardMenu:ShowCloseButton( false )
 
+	local clr_bg = Color(14, 14, 14, 235)
+	local clr_accent = Color(140, 140, 145)
+	local clr_text = Color(225, 225, 225)
+	local clr_text_sub = Color(105, 105, 105)
+
+	scoreBoardMenu.Paint = function(self, w, h)
+		draw.RoundedBox(0, 0, 0, w, h, clr_bg)
+		hg.DrawBlur(self, 5)
+
+		local gridSize = ScreenScale(25)
+		local gridSpeed = 12
+		local gridTime = RealTime() * gridSpeed
+		local gridAlpha = 12
+		local offset = gridTime % gridSize
+
+		surface.SetDrawColor(200, 200, 200, gridAlpha)
+		for i = -1, math.ceil(w / gridSize) + 1 do
+			local x = i * gridSize - offset
+			surface.DrawRect(x, 0, 1, h)
+		end
+		for i = -1, math.ceil(h / gridSize) + 1 do
+			local y = i * gridSize + offset
+			surface.DrawRect(0, y, w, 1)
+		end
+
+		surface.SetDrawColor(clr_bg)
+		surface.SetTexture(surface.GetTextureID("vgui/gradient-l"))
+		surface.DrawTexturedRect(0, 0, w, h)
+
+		surface.SetDrawColor(83, 83, 83, 30)
+		surface.SetTexture(surface.GetTextureID("vgui/gradient-d"))
+		surface.DrawTexturedRect(0, 0, w, h)
+	end
+
 	local muteallbut = vgui.Create("DButton", scoreBoardMenu)
 	local w, h = ScreenScale(30),ScreenScale(6)
 	muteallbut:SetPos(scoreBoardMenu:GetWide()-w*2.3,scoreBoardMenu:GetTall() - h * 1.5)
@@ -528,8 +939,9 @@ function GM:ScoreboardShow()
 	muteallbut:SetText("Mute all")
 	
 	muteallbut.Paint = function(self,w,h)
-		surface.SetDrawColor( not hg.muteall and 255 or 0, hg.muteall and 255 or 0, 0, 128)
-        surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
+		local clr = hg.muteall and scoreOutlineActive or scoreOutline
+		surface.SetDrawColor(clr.r, clr.g, clr.b, clr.a)
+		surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
 	end
 
 	muteallbut.DoClick = function(self,w,h)
@@ -561,8 +973,9 @@ function GM:ScoreboardShow()
 	mutespectbut:SetText("Mute spectators")
 	
 	mutespectbut.Paint = function(self,w,h)
-		surface.SetDrawColor( not hg.mutespect and 255 or 0, hg.mutespect and 255 or 0, 0, 128)
-        surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
+		local clr = hg.mutespect and scoreOutlineActive or scoreOutline
+		surface.SetDrawColor(clr.r, clr.g, clr.b, clr.a)
+		surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
 	end
 
 	mutespectbut.DoClick = function(self,w,h)
@@ -593,35 +1006,46 @@ function GM:ScoreboardShow()
 	local ServerName = GetHostName() or "ZCity | Developer Server | #01"
 	local tick
 	scoreBoardMenu.PaintOver = function(self,w,h)
-		surface.SetDrawColor( 255, 0, 0, 128)
-        surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
+		surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 100)
+		surface.DrawOutlinedRect(0, 0, w, h, 2)
 
-		surface.SetFont( "ZB_InterfaceLarge" )
-		surface.SetTextColor(col.r,col.g,col.b,col.a)
-		local lengthX, lengthY = surface.GetTextSize(ServerName)
-		surface.SetTextPos(w / 2 - lengthX/2,10)
-		surface.DrawText(ServerName)
+		local title = string.upper(ServerName)
+		local t = RealTime() * 4
+		surface.SetFont("ZB_InterfaceLarge")
+		local tw, th = surface.GetTextSize(title)
+		local x, y = w / 2, 15
+		local startX = x - tw * 0.5
+
+		draw.SimpleText(title, "ZB_InterfaceLarge", x + 2, y + 2, Color(0, 0, 0, 150), TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
+		local chars = GetTextChars(title)
+		local accumulatedW = 0
+		for i, char in ipairs(chars) do
+			local cw = surface.GetTextSize(char)
+			local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+			local col_shimmer = Color(100, 100, 100):Lerp(Color(255, 255, 255), shimmer)
+			draw.SimpleText(char, "ZB_InterfaceLarge", startX + accumulatedW, y, col_shimmer, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+			accumulatedW = accumulatedW + cw
+		end
 
 		surface.SetFont( "ZB_InterfaceSmall" )
-		surface.SetTextColor(col.r,col.g,col.b,col.a*0.1)
+		surface.SetTextColor(clr_text_sub.r, clr_text_sub.g, clr_text_sub.b, 100)
 		local txt = "ZC Version: "..hg.Version
 		local lengthX, lengthY = surface.GetTextSize(txt)
 		surface.SetTextPos(w*0.01,h - lengthY - h*0.01)
 		surface.DrawText(txt)
 
 		surface.SetFont( "ZB_InterfaceMediumLarge" )
-		surface.SetTextColor(col.r,col.g,col.b,col.a)
-		local lengthX, lengthY = surface.GetTextSize("Players:")
-		surface.SetTextPos(w / 4 - lengthX/2,ScreenScale(25))
-		surface.DrawText("Players:")
+		surface.SetTextColor(clr_text.r, clr_text.g, clr_text.b, 255)
+		
+		local pTxt = "PLAYERS [" .. #player.GetAll() - #team.GetPlayers(TEAM_SPECTATOR) .. "]"
+		draw.SimpleText(pTxt, "ZB_InterfaceMediumLarge", w / 4, ScreenScale(25), clr_text, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
 
-		surface.SetFont( "ZB_InterfaceMediumLarge" )
-		surface.SetTextColor(col.r,col.g,col.b,col.a)
-		local lengthX, lengthY = surface.GetTextSize("Spectators:")
-		surface.SetTextPos(w * 0.75 - lengthX/2,ScreenScale(25))
-		surface.DrawText("Spectators:")
+		local sTxt = "SPECTATORS [" .. #team.GetPlayers(TEAM_SPECTATOR) .. "]"
+		draw.SimpleText(sTxt, "ZB_InterfaceMediumLarge", w * 0.75, ScreenScale(25), clr_text, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+
 		tick = math.Round(1 / engine.ServerFrameTime())
-		local txt = "SV Tick: " .. tick
+		local txt = "SV TICK: " .. tick
 		local lengthX, lengthY = surface.GetTextSize(txt)
 		surface.SetTextPos(w * 0.5 - lengthX/2,ScreenScale(25))
 		surface.DrawText(txt)
@@ -642,7 +1066,7 @@ function GM:ScoreboardShow()
 		end
 
 		SPECTATE.Paint = function(self,w,h)
-			surface.SetDrawColor( 255, 0, 0, 128)
+			surface.SetDrawColor(scoreOutline.r, scoreOutline.g, scoreOutline.b, scoreOutline.a)
 			surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
 			surface.SetFont( "ZB_InterfaceMedium" )
 			surface.SetTextColor(col.r,col.g,col.b,col.a)
@@ -667,7 +1091,7 @@ function GM:ScoreboardShow()
 		end
 
 		PLAYING.Paint = function(self,w,h)
-			surface.SetDrawColor( 255, 0, 0, 128)
+			surface.SetDrawColor(scoreOutline.r, scoreOutline.g, scoreOutline.b, scoreOutline.a)
 			surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
 			surface.SetFont( "ZB_InterfaceMedium" )
 			surface.SetTextColor(col.r,col.g,col.b,col.a)
@@ -685,11 +1109,11 @@ function GM:ScoreboardShow()
 	function DScrollPanel:Paint( w, h )
 		-- BlurBackground(self)
 
-		surface.SetDrawColor(0, 0, 0, 125)
+		surface.SetDrawColor(0, 0, 0, 100)
 		surface.DrawRect(0, 0, w, h)
 
-		surface.SetDrawColor( 255, 0, 0, 128)
-        surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
+		surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 50)
+        surface.DrawOutlinedRect( 0, 0, w, h, 1 )
 	end
 
 	local disappearance = lply:GetNetVar("disappearance", nil)
@@ -717,27 +1141,41 @@ function GM:ScoreboardShow()
 	
 		but.Paint = function(self, w, h)
 			if not IsValid(ply) then return end
-			surface.SetDrawColor(colBlueUp.r, colBlueUp.g, colBlueUp.b, colBlueUp.a)
-			surface.DrawRect(0, 0, w, h)
-			surface.SetDrawColor(colBlue.r, colBlue.g, colBlue.b, colBlue.a)
-			surface.DrawRect(0, h / 2, w, h / 2)
+			local hov = self:IsHovered() and 1 or 0
+			self.HoverLerp = LerpFT(0.1, self.HoverLerp or 0, hov)
+			local v = self.HoverLerp
+
+			draw.RoundedBox(0, 0, 0, w, h, Color(20, 20, 25, 150 + v * 50))
+			surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 20 + v * 100)
+			surface.DrawOutlinedRect(0, 0, w, h, 1)
 	
 			surface.SetFont("ZB_InterfaceMediumLarge")
-			surface.SetTextColor(col.r, col.g, col.b, col.a)
-			local lengthX, lengthY = surface.GetTextSize(ply:Name() or "He quited...")
-			surface.SetTextPos(15, h / 2 - lengthY / 2)
-			surface.DrawText(ply:Name() or "He quited...")
+			local playerTitle = string.upper(ply:Name() or "Unknown") .. "  |  " .. string.upper(GetScoreboardPrivilegeTag(ply))
+			
+			local t = RealTime() * 7
+			local chars = GetTextChars(playerTitle)
+			local cx = 15
+			for i, char in ipairs(chars) do
+				local cw = surface.GetTextSize(char)
+				local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+				local col = clr_text:Lerp(Color(255, 255, 255), v * shimmer)
+				draw.SimpleText(char, "ZB_InterfaceMediumLarge", cx, h / 2, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				cx = cx + cw
+			end
 	
-			surface.SetFont("ZB_InterfaceMediumLarge")
-			surface.SetTextColor(col.r, col.g, col.b, col.a)
-			local lengthX, lengthY = surface.GetTextSize(ply:Ping() or "He quited...")
-			surface.SetTextPos(w - lengthX - 15, h / 2 - lengthY / 2)
-			surface.DrawText(ply:Ping() or "He quited...")
+			draw.SimpleText(ply:Ping(), "ZB_InterfaceMediumLarge", w - 15, h / 2, clr_text, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 		end
 
 		function but:DoClick()
 			if ply:IsBot() then chat.AddText(Color(255,0,0), "no, you can't") return end
-			gui.OpenURL("https://steamcommunity.com/profiles/"..ply:SteamID64())
+			hg.Query(
+				"ОТКРЫТЬ ВНЕШНЮЮ ССЫЛКУ НА ПРОФИЛЬ " .. string.upper(ply:Nick()) .. "?",
+				"Внешняя ссылка",
+				"ОТКРЫТЬ", function() 
+					gui.OpenURL("https://steamcommunity.com/profiles/" .. ply:SteamID64()) 
+				end,
+				"ОТМЕНА"
+			)
 		end
 
 		function but:DoRightClick()
@@ -762,11 +1200,11 @@ function GM:ScoreboardShow()
 	function DScrollPanel:Paint( w, h )
 		-- BlurBackground(self)
 
-		surface.SetDrawColor(0, 0, 0, 125)
+		surface.SetDrawColor(0, 0, 0, 100)
 		surface.DrawRect(0, 0, w, h)
 
-		surface.SetDrawColor( 255, 0, 0, 128)
-        surface.DrawOutlinedRect( 0, 0, w, h, 2.5 )
+		surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 50)
+        surface.DrawOutlinedRect( 0, 0, w, h, 1 )
 	end
 
 	for i, ply in player.Iterator() do
@@ -793,27 +1231,41 @@ function GM:ScoreboardShow()
 
 		but.Paint = function(self,w,h)
 			if not IsValid(ply) then return end
-			surface.SetDrawColor(colSpect2.r,colSpect2.g,colSpect2.b,colSpect2.a)
-			surface.DrawRect(0,0,w,h)
-			surface.SetDrawColor(colSpect1.r,colSpect1.g,colSpect1.b,colSpect1.a)
-			surface.DrawRect(0,h/2,w,h/2)
+			local hov = self:IsHovered() and 1 or 0
+			self.HoverLerp = LerpFT(0.1, self.HoverLerp or 0, hov)
+			local v = self.HoverLerp
 
-			surface.SetFont( "ZB_InterfaceMediumLarge" )
-			surface.SetTextColor(col.r,col.g,col.b,col.a)
-			local lengthX, lengthY = surface.GetTextSize( ply:Name() or "He quited..." )
-			surface.SetTextPos(15,h/2 - lengthY/2)
-			surface.DrawText(ply:Name() or "He quited...")
+			draw.RoundedBox(0, 0, 0, w, h, Color(20, 20, 25, 120 + v * 40))
+			surface.SetDrawColor(clr_accent.r, clr_accent.g, clr_accent.b, 10 + v * 80)
+			surface.DrawOutlinedRect(0, 0, w, h, 1)
 
-			surface.SetFont( "ZB_InterfaceMediumLarge" )
-			surface.SetTextColor(col.r,col.g,col.b,col.a)
-			local lengthX, lengthY = surface.GetTextSize( ply:Ping() or "He quited..." )
-			surface.SetTextPos(w - lengthX -15,h/2 - lengthY/2)
-			surface.DrawText(ply:Ping() or "He quited...")
+			surface.SetFont("ZB_InterfaceMediumLarge")
+			local playerTitle = string.upper(ply:Name() or "Unknown") .. "  |  " .. string.upper(GetScoreboardPrivilegeTag(ply))
+
+			local t = RealTime() * 7
+			local chars = GetTextChars(playerTitle)
+			local cx = 15
+			for i, char in ipairs(chars) do
+				local cw = surface.GetTextSize(char)
+				local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+				local col = clr_text:Lerp(Color(255, 255, 255), v * shimmer)
+				draw.SimpleText(char, "ZB_InterfaceMediumLarge", cx, h / 2, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+				cx = cx + cw
+			end
+
+			draw.SimpleText(ply:Ping(), "ZB_InterfaceMediumLarge", w - 15, h / 2, clr_text, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
 		end
 
 		function but:DoClick()
 			if ply:IsBot() then chat.AddText("That bot.") return end
-			gui.OpenURL("https://steamcommunity.com/profiles/"..ply:SteamID64())
+			hg.Query(
+				"ОТКРЫТЬ ВНЕШНЮЮ ССЫЛКУ НА ПРОФИЛЬ " .. string.upper(ply:Nick()) .. "?",
+				"Внешняя ссылка",
+				"ОТКРЫТЬ", function() 
+					gui.OpenURL("https://steamcommunity.com/profiles/" .. ply:SteamID64()) 
+				end,
+				"ОТМЕНА"
+			)
 		end
 
 		function but:DoRightClick()
@@ -943,7 +1395,7 @@ end
 
 local snakeGameOpen = false
 
-concommand.Add("zb_snake", function() -- вот как здесь!
+concommand.Add("zb_snake", function()
     if snakeGameOpen then
         print("[Snake Game] Игра уже запущена!")
         return
@@ -1084,7 +1536,7 @@ concommand.Add("zb_snake", function() -- вот как здесь!
     end
 
 
-    function frame:OnKeyCodePressed(key) -- ФУРИ МУВ теперь понятно почему лагает змейка
+    function frame:OnKeyCodePressed(key)
         if key == KEY_W and snakeDirection ~= "DOWN" then
             snakeDirection = "UP"
         elseif key == KEY_S and snakeDirection ~= "UP" then
@@ -1110,7 +1562,7 @@ concommand.Add("zb_snake", function() -- вот как здесь!
     frame.OnClose = function()
         timer.Remove("SnakeGameTimer")
         snakeGameOpen = false  
-        print("[Snake Game] Игра закрыта.") -- НЕ РАБОТАЕТ
+        print("[Snake Game] Игра закрыта.")
     end
 
 
@@ -1122,3 +1574,5 @@ hook.Add("Player Spawn", "GuiltKnown",function(ply)
 		system.FlashWindow()
 	end
 end)
+-- август когда норм таб меню
+-- колл хуйню накодил
