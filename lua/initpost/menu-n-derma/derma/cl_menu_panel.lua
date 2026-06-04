@@ -32,7 +32,7 @@ local function OpenStandaloneContent(drawFunc)
             self:Remove()
         end
     end
-
+    -- это меню работает на ебейших костылях из за колла который накодил хуйню
     function panel:OnRemove()
         if hg then
             hg.StandaloneEscPanel = nil
