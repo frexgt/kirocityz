@@ -408,7 +408,7 @@ hook.Add("Post Post Processing", "ItHurts", function()
 		render.SetMaterial(heatMat)
 		render.DrawScreenQuad()
 	end
-
+    -- много эффектов из за этого у игроков с слабым пк он не выдерживает и крашается игра
 	local pain = org.pain or 0
 	pain = math.max(pain - 15, 0)
 	local shock = (org.shock or 0) * 1 + (1 - org.consciousness) * 40
