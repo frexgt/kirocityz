@@ -79,7 +79,7 @@ end
 function PANEL:Paint(width, height)
 	local newAlpha
 
-	if (hg.chat:GetActive()) then
+	if (hg.chat:active(1)) then
 		newAlpha = math.max(hg.chat.alpha, self.alpha)
 	else
 		newAlpha = self.alpha - (255 - hg.chat.realAlpha)
