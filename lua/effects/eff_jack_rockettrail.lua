@@ -30,6 +30,6 @@ function EFFECT:Think()
 	return false
 end
 
-function EFFECT:Render()
+function effect:local(render)
 end
 --
