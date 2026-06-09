@@ -9,14 +9,149 @@ local hg_firstperson_death = CreateClientConVar("hg_firstperson_death", "0", tru
 local hg_font = CreateClientConVar("hg_font", "Bahnschrift", true, false, "изменение каждого шрифта текста на выбранный, потому что настройка пользовательского интерфейса - это крутоё")
 local hg_attachment_draw_distance = CreateClientConVar("hg_attachment_draw_distance", 0, true, nil, "расстояние достижений", 0, 4096)
 
-xbars = 17
-ybars = 30
+local function GetTextChars(text)
+    local chars = {}
+    if utf8 then
+        for _, code in utf8.codes(text) do
+            chars[#chars + 1] = utf8.char(code)
+        end
+    else
+        for i = 1, #text do chars[#chars + 1] = text:sub(i, i) end
+    end
+    return chars
+end
 
-gradient_l = Material("vgui/gradient-l")
+local gradient_l = Material("vgui/gradient-l")
+local gradient_d = surface.GetTextureID("vgui/gradient-d")
+local gradient_l_tex = surface.GetTextureID("vgui/gradient-l")
 
-local blur = Material("pp/blurscreen")
-local blur2 = Material("effects/shaders/zb_blur" )
-local sw, sh = ScrW(), ScrH()
+local clr_bg = Color(30, 30, 36, 197)
+local clr_accent = Color(200, 40, 40)
+local clr_text = Color(225, 225, 225)
+local clr_hover = Color(170, 170, 170)
+local clr_sub = Color(105, 105, 105)
+local clr_toggle_off = Color(50, 50, 55, 220)
+local clr_toggle_on = Color(220, 220, 225, 255)
+local title_grad_white = Color(255, 255, 255)
+local title_grad_gray = Color(70, 70, 70)
+local title_shadow = Color(0, 0, 0, 160)
+
+local settings_pad_l = ScreenScale(16)
+local settings_text_frac = 0.52
+local settings_dock_x = ScrW() * 0.06
+
+local function GetSettingsLayout(w)
+    local ctrlX = math.floor(w * settings_text_frac)
+
+    return {
+        padL = settings_pad_l,
+        ctrlX = ctrlX,
+        ctrlW = w - ctrlX - ScreenScale(10),
+        textW = math.max(ctrlX - settings_pad_l - ScreenScale(12), ScreenScale(80)),
+    }
+end
+
+local function NumLerp(t, a, b)
+    t = math.Clamp(tonumber(t) or 0, 0, 1)
+    a = tonumber(a) or 0
+    b = tonumber(b) or 0
+    return a + (b - a) * t
+end
+
+local function GetTextWidth(text, font)
+    surface.SetFont(font)
+    local w = select(1, surface.GetTextSize(tostring(text or "")))
+    return tonumber(w) or 0
+end
+
+local function DrawClippedText(text, font, x, y, maxW, color, alignY)
+    local fullW = GetTextWidth(text, font)
+
+    if fullW <= maxW then
+        draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_LEFT, alignY)
+        return fullW
+    end
+
+    local trimmed = text
+    while #trimmed > 1 and GetTextWidth(trimmed .. "...", font) > maxW do
+        trimmed = trimmed:sub(1, -2)
+    end
+
+    draw.SimpleText(trimmed .. "...", font, x, y, color, TEXT_ALIGN_LEFT, alignY)
+    return maxW
+end
+
+local function DrawRowText(text, font, x, y, normalW, fullW, expand, color, alignY)
+    local drawW = NumLerp(expand, normalW, fullW)
+
+    if expand > 0.95 or fullW <= normalW then
+        draw.SimpleText(text, font, x, y, color, TEXT_ALIGN_LEFT, alignY)
+        return
+    end
+
+    DrawClippedText(text, font, x, y, drawW, color, alignY)
+end
+
+local function GetExpandedCtrlX(w, layout, maxTextW, expand)
+    w = tonumber(w) or 0
+    maxTextW = tonumber(maxTextW) or 0
+    expand = math.Clamp(tonumber(expand) or 0, 0, 1)
+
+    local textW = tonumber(layout and layout.textW) or 0
+    local padL = tonumber(layout and layout.padL) or settings_pad_l
+    local expandedTextW = NumLerp(expand, textW, maxTextW)
+    local ctrlX = padL + expandedTextW + ScreenScale(12)
+    local minCtrlX = math.floor(w * settings_text_frac)
+
+    return math.Clamp(ctrlX, minCtrlX, w - ScreenScale(80))
+end
+
+surface.CreateFont("ZC_Settings_Title", {
+    font = "Bahnschrift",
+    size = ScreenScale(28),
+    weight = 800,
+    antialias = true,
+    extended = true
+})
+
+local function TextChars(text)
+    local chars = {}
+
+    if utf8 and utf8.codes then
+        for _, code in utf8.codes(text) do
+            chars[#chars + 1] = utf8.char(code)
+        end
+    else
+        for i = 1, #text do
+            chars[#chars + 1] = text:sub(i, i)
+        end
+    end
+
+    return chars
+end
+
+local function MakePanelClickable(panel, onClick)
+    if not IsValid(panel) then return end
+    panel:SetMouseInputEnabled(true)
+    function panel:OnMousePressed(mouseCode)
+        if mouseCode == MOUSE_LEFT and onClick then
+            onClick(self)
+        end
+    end
+end
+
+local function PanelHovered(panel)
+    if not IsValid(panel) then return false end
+    if panel:IsHovered() then return true end
+
+    for _, child in ipairs(panel:GetChildren()) do
+        if IsValid(child) and child:IsHovered() then
+            return true
+        end
+    end
+
+    return false
+end
 
 local font = function() -- hg_coolvetica:GetBool() and "Coolvetica" or "Bahnschrift"
     local usefont = "Bahnschrift"
@@ -114,19 +249,40 @@ hg.settings:AddOpt("Sound","hg_quietshots", "включить/выключить
 
 
 function hg.CreateCategory(ctgName, ParentPanel, yPos)
-    local pppanel = vgui.Create('DPanel', ParentPanel)
-    pppanel:SetSize(ParentPanel:GetWide() / 1.05, ParentPanel:GetTall() * 0.07)
-    pppanel:SetPos(ParentPanel:GetWide() / 2 -pppanel:GetWide() / 2, yPos)
-    --pppanel:SetText(ctgName)
-    pppanel.Paint = function(self,w,h)
-        surface.SetDrawColor(60,60,60,145)
-        surface.DrawRect(0, 0, w, h)
-		surface.SetDrawColor(42, 42, 42, 184)
-		surface.DrawRect(0, h-5, w, 5)
-    
-        draw.SimpleText(ctgName, 'ZCity_setiings_category', w / 2, h / 2, color3, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    local pppanel = vgui.Create("DPanel", ParentPanel)
+    pppanel:SetSize(ParentPanel:GetWide(), ScreenScale(18))
+    pppanel:SetPos(0, yPos)
+    pppanel:SetMouseInputEnabled(true)
+    pppanel.SettingsHover = 0
+
+    local ctgText = string.upper(ctgName)
+    pppanel.CtgFullW = GetTextWidth(ctgText, "ZCity_Small")
+
+    pppanel.Paint = function(self, w, h)
+        local drawX = ScreenScale(16)
+        local t = RealTime() * 7
+        local chars = GetTextChars(ctgText)
+        local cx = drawX
+
+        surface.SetFont("ZCity_Small")
+        for i, char in ipairs(chars) do
+            local cw = surface.GetTextSize(char)
+            local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+            local col_shimmer = Color(40, 40, 40):Lerp(Color(255, 255, 255), shimmer)
+            
+            local v = self.SettingsHover or 0
+            local col = title_grad_white:Lerp(col_shimmer, v)
+
+            draw.SimpleText(char, "ZCity_Small", cx + 1, h * 0.5 + 1, Color(0, 0, 0, 150), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText(char, "ZCity_Small", cx, h * 0.5, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            cx = cx + cw
+        end
     end
-    
+
+    pppanel.Think = function(self)
+        self.SettingsHover = LerpFT(0.2, self.SettingsHover or 0, self:IsHovered() and 1 or 0)
+    end
+
     return pppanel
 end
 
@@ -140,7 +296,11 @@ function hg.GetConVarType(convar)
         return 'bool'
     end
 
-    if tonumber(stringv) and math.floor(stringv) == floatVal then
+    if tonumber(stringv) then
+        if floatVal ~= intVal or string.find(stringv, "%.") then
+            return "int"
+        end
+
         if intVal == floatVal then
             return "int"
         end
@@ -167,137 +327,236 @@ local function SetConVarValue(convar, value)
     RunConsoleCommand(name, tostring(value))
 end
 
-local clr_1 = Color(255,255,255,104)
-local clr_2 = Color(122,122,122,104)
-local clr_3 = Color(28,28,28)
-local clr_4 = Color(0, 0, 0, 30)
-local clr_5 = Color(30, 29, 29, 30)
-local clr_6 = Color(255, 255, 255, 100)
-local clr_7 = Color(255, 255, 255, 200)
-local clr_8 = Color(70, 130, 180)
+local function StyleNumSlider(slider)
+    if not IsValid(slider) then return end
+
+    slider:SetDark(true)
+    slider.Paint = function() end
+    slider.Label:SetVisible(false)
+
+    if IsValid(slider.TextArea) then
+        slider.TextArea:SetVisible(false)
+    end
+
+    if IsValid(slider.Slider) then
+        slider.Slider.Paint = function(self, w, h)
+            draw.RoundedBox(0, 0, h * 0.5 - 2, w, 4, Color(45, 45, 50, 255))
+        end
+
+        if IsValid(slider.Slider.Knob) then
+            slider.Slider.Knob.Paint = function(self, w, h)
+                local col = self:IsHovered() and clr_hover or clr_text
+                draw.RoundedBox(0, 0, 0, w, h, col)
+            end
+        end
+    end
+end
+
 function hg.CreateButton(buttonData, convarName, ParentPanel, yPos)
     local convar = GetConVar(convarName)
 
     if not convar then 
         return 
     end
-    local pppanel = vgui.Create('DPanel', ParentPanel)
-    pppanel:SetSize(ParentPanel:GetWide()/1.05, ParentPanel:GetTall()/15)
-    pppanel:SetPos(ParentPanel:GetWide()/2-pppanel:GetWide()/2, yPos)
-    
-    surface.SetFont('ZCity_setiings_fine')
-    local width2, height2 = surface.GetTextSize(buttonData[3])
-    
-    convarType = buttonData[6] or hg.GetConVarType(convar)
-    pppanel.Paint = function(self,w,h)
-        surface.SetDrawColor(43, 43, 43,145)
-        surface.DrawRect(0, 0, w, h)
-		surface.SetDrawColor(47, 47, 47,145)
-		surface.DrawRect(0, h-3, w, 3)
-        
-        draw.SimpleText(buttonData[3], 'ZCity_setiings_fine', 30, h / 2 -height2/2.5, clr_1, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-        draw.SimpleText(convar:GetHelpText(), 'ZCity_setiings_tiny', 30, h / 2+height2/2, clr_2, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+    local pppanel = vgui.Create("DPanel", ParentPanel)
+    pppanel:SetSize(ParentPanel:GetWide(), ScreenScale(28))
+    pppanel:SetPos(0, yPos)
+    pppanel.SettingsHover = 0
+
+    surface.SetFont("ZCity_Tiny")
+    local _, helpH = surface.GetTextSize(convar:GetHelpText() or "")
+    local hasHelp = convar:GetHelpText() and convar:GetHelpText() ~= ""
+    if hasHelp then
+        pppanel:SetTall(ScreenScale(34) + helpH * 0.5)
     end
 
-    if convarType == 'bool' then
-        local toggle = vgui.Create('DButton', pppanel)
-        toggle:SetSize(pppanel:GetWide() / 18, pppanel:GetTall() / 2)
+    convarType = buttonData[6] or hg.GetConVarType(convar)
+    local layout = GetSettingsLayout(pppanel:GetWide())
+    local helpText = convar:GetHelpText() or ""
 
-        
-        toggle:SetPos(pppanel:GetWide() - toggle:GetWide()*1.4 - pppanel:GetWide() / 20, pppanel:GetTall() / 2 - toggle:GetTall() / 2)
-        toggle:SetText('')
-        
+    pppanel:SetMouseInputEnabled(true)
+    pppanel.TitleText = buttonData[3]
+    pppanel.HelpText = helpText
+    pppanel.SettingsTitleW = GetTextWidth(buttonData[3], "ZCity_Small")
+    pppanel.SettingsHelpW = hasHelp and GetTextWidth(helpText, "ZCity_Tiny") or 0
+    pppanel.SettingsMaxTextW = math.max(pppanel.SettingsTitleW, pppanel.SettingsHelpW)
+    pppanel.NeedsExpand = pppanel.SettingsTitleW > layout.textW or pppanel.SettingsHelpW > layout.textW
+
+    local function UpdateControlPositions(expand)
+        expand = math.Clamp(tonumber(expand) or 0, 0, 1)
+        local w = pppanel:GetWide()
+        local rowLayout = GetSettingsLayout(w)
+        local ctrlX = GetExpandedCtrlX(w, rowLayout, pppanel.SettingsMaxTextW, expand)
+        local ctrlW = w - ctrlX - ScreenScale(10)
+        local rowCtrlY = pppanel:GetTall() * 0.5
+
+        if IsValid(pppanel.Toggle) then
+            local tw, th = pppanel.Toggle:GetSize()
+            pppanel.Toggle:SetPos(ctrlX + ctrlW - tw, rowCtrlY - th * 0.5)
+        end
+
+        if IsValid(pppanel.ValueLabel) and IsValid(pppanel.Slider) then
+            local valW = ScreenScale(42)
+            local sliderH = ScreenScale(14)
+            local sliderW = math.max(ctrlW - valW - ScreenScale(8), ScreenScale(40))
+
+            pppanel.ValueLabel:SetPos(ctrlX, rowCtrlY - sliderH * 0.5)
+            pppanel.Slider:SetSize(sliderW, sliderH)
+            pppanel.Slider:SetPos(ctrlX + valW + ScreenScale(8), rowCtrlY - sliderH * 0.5)
+        end
+
+        if IsValid(pppanel.TextEntry) then
+            local entryW = ScreenScale(80)
+            pppanel.TextEntry:SetPos(ctrlX + ctrlW - entryW, rowCtrlY - pppanel.TextEntry:GetTall() * 0.5)
+        end
+    end
+
+    pppanel.UpdateControlPositions = UpdateControlPositions
+
+    pppanel.Paint = function(self, w, h)
+        local hover = tonumber(self.SettingsHover) or 0
+        local expand = self.NeedsExpand and hover or 0
+        local col = clr_text:Lerp(clr_hover, hover)
+        local subCol = clr_sub:Lerp(Color(140, 140, 145), hover)
+        local rowLayout = GetSettingsLayout(w)
+        local titleY = hasHelp and h * 0.26 or h * 0.5
+
+        local v = self.SettingsHover or 0
+        local strTitle = self.TitleText
+        local ntxt = ""
+        for i = 1, #strTitle do
+            local char = strTitle:sub(i, i)
+            if i <= math.ceil(#strTitle * v) then
+                ntxt = ntxt .. string.upper(char)
+            else
+                ntxt = ntxt .. char
+            end
+        end
+
+        local chars = GetTextChars(ntxt)
+        local cx = rowLayout.padL
+        local t = RealTime() * 7
+        surface.SetFont("ZCity_Small")
+
+        for i, char in ipairs(chars) do
+            local cw = surface.GetTextSize(char)
+            local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+            local col_shimmer = Color(30, 30, 30):Lerp(Color(255, 255, 255), shimmer)
+            local finalCol = clr_text:Lerp(col_shimmer, v)
+
+            draw.SimpleText(char, "ZCity_Small", cx + 1, titleY + 1, Color(0, 0, 0, 180 * v), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            draw.SimpleText(char, "ZCity_Small", cx, titleY, finalCol, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            cx = cx + cw
+        end
+
+        if hasHelp then
+            draw.SimpleText(self.HelpText, "ZCity_Tiny", rowLayout.padL, h * 0.74, subCol, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+        end
+    end
+
+    pppanel.Think = function(self)
+        self.SettingsHover = LerpFT(0.2, tonumber(self.SettingsHover) or 0, PanelHovered(self) and 1 or 0)
+        local expand = self.NeedsExpand and (tonumber(self.SettingsHover) or 0) or 0
+        self:UpdateControlPositions(expand)
+        self:SetZPos(expand > 0.01 and 50 or 0)
+    end
+
+    local ctrlY = pppanel:GetTall() * 0.5
+
+    if convarType == 'bool' then
+        local toggleW, toggleH = ScreenScale(36), ScreenScale(14)
+        local toggle = vgui.Create("DPanel", pppanel)
+        pppanel.Toggle = toggle
+        toggle:SetSize(toggleW, toggleH)
+        toggle:SetPos(layout.ctrlX + layout.ctrlW - toggleW, ctrlY - toggleH * 0.5)
+
         local animProgress = convar:GetBool() and 1 or 0
         local targetProgress = animProgress
-        
-        function toggle:Paint(w, h)
+
+        toggle.Paint = function(s, w, h)
             if animProgress ~= targetProgress then
                 animProgress = Lerp(FrameTime() * 8, animProgress, targetProgress)
             end
-            
-            local bgColor = Color(
-                Lerp(animProgress, 180, 80),  
-                Lerp(animProgress, 30, 120),  
-                Lerp(animProgress, 30, 50)   
-            )
-            
-            local shadowColor = Color(0, 0, 0, Lerp(animProgress, 150, 40))
-            surface.SetDrawColor(clr_3)
-            draw.RoundedBox(0, 0, 0, w, h, clr_3)
-            
-            surface.SetDrawColor(clr_5)
-            draw.RoundedBox(0, 2, 2, w - 4, h - 4, clr_4)
-            
-            local slsize = h - 12
-            local slPos = Lerp(animProgress, 6, w - slsize - 6)
-            surface.SetDrawColor(bgColor)
-            draw.RoundedBox(0, slPos, 6, slsize, slsize, bgColor)
-            surface.SetDrawColor(shadowColor)
-            surface.DrawRect(slPos, slsize+4, slsize, 3)
-    
-            surface.SetDrawColor(clr_6)
-        end
-        
-        function toggle:DoClick()
-            if convar then
-                local newValue = not convar:GetBool()
-                SetConVarValue(convar, newValue)
 
-                surface.PlaySound('glide/headlights_on.wav')
-                targetProgress = newValue and 1 or 0
-            end
+            local trackCol = clr_toggle_off:Lerp(clr_toggle_on, animProgress)
+            draw.RoundedBox(0, 0, 0, w, h, trackCol)
+
+            local slsize = h - 6
+            local slPos = Lerp(animProgress, 3, w - slsize - 3)
+            local knobCol = Color(
+                Lerp(animProgress, 120, 255),
+                Lerp(animProgress, 120, 255),
+                Lerp(animProgress, 125, 255)
+            )
+            draw.RoundedBox(0, slPos, 3, slsize, slsize, knobCol)
         end
-        
+
+        MakePanelClickable(toggle, function()
+            if not convar then return end
+            local newValue = not convar:GetBool()
+            SetConVarValue(convar, newValue)
+            surface.PlaySound("shitty/tap_depress.wav")
+            targetProgress = newValue and 1 or 0
+        end)
+
     elseif convarType == 'int' then
-        local slider = vgui.Create('DNumSlider', pppanel)
-        slider:SetSize(280, 30)
-        slider:SetPos(pppanel:GetWide() - 300, pppanel:GetTall() / 2 - 15)
-        slider:SetText('')
-        
+        local valW = ScreenScale(42)
+        local sliderH = ScreenScale(14)
+        local sliderW = layout.ctrlW - valW - ScreenScale(8)
+
+        local valueLabel = vgui.Create("DLabel", pppanel)
+        pppanel.ValueLabel = valueLabel
+        valueLabel:SetPos(layout.ctrlX, ctrlY - sliderH * 0.5)
+        valueLabel:SetSize(valW, sliderH)
+        valueLabel:SetTextColor(clr_text)
+        valueLabel:SetFont("ZCity_Tiny")
+        valueLabel:SetContentAlignment(6)
+
+        local slider = vgui.Create("DNumSlider", pppanel)
+        pppanel.Slider = slider
+        slider:SetSize(sliderW, sliderH)
+        slider:SetPos(layout.ctrlX + valW + ScreenScale(8), ctrlY - sliderH * 0.5)
+        slider:SetText("")
+
         local min = convar:GetMin() or 0
         local max = convar:GetMax() or 100
-        local decimals = buttonData[4] and 2 or 0
-        
+        local decimals = buttonData[4] and 2 or (convar:GetFloat() ~= convar:GetInt() and 2 or 0)
+
         slider:SetMin(min)
         slider:SetMax(max)
         slider:SetDecimals(decimals)
         slider:SetValue(decimals > 0 and convar:GetFloat() or convar:GetInt())
-        
+        StyleNumSlider(slider)
+
         function slider:OnValueChanged(val)
             if convar then
                 SetConVarValue(convar, decimals > 0 and math.Round(val, decimals) or math.Round(val))
             end
         end
-        
-        local valueLabel = vgui.Create('DLabel', pppanel)
-        valueLabel:SetPos(pppanel:GetWide() - 350, pppanel:GetTall() / 2 - 8)
-        valueLabel:SetSize(50, 20)
-        valueLabel:SetText(convar:GetInt())
-        valueLabel:SetTextColor(clr_7)
-        valueLabel:SetFont('ZCity_setiings_tiny')
-        
+
         slider.Think = function()
             if convar then
-                valueLabel:SetText(convar:GetInt())
+                valueLabel:SetText(decimals > 0 and string.format("%." .. decimals .. "f", convar:GetFloat()) or tostring(convar:GetInt()))
             end
         end
-        
+        slider:OnValueChanged(slider:GetValue())
+
     elseif convarType == 'string' then
-        local textEntry = vgui.Create('DTextEntry', pppanel)
-        textEntry:SetSize(pppanel:GetWide()/8, pppanel:GetTall()/2)
-        textEntry:SetPos(pppanel:GetWide()-pppanel:GetWide()/8-20, pppanel:GetTall()/2-textEntry:GetTall()/2)
+        local entryW = ScreenScale(80)
+        local textEntry = vgui.Create("DTextEntry", pppanel)
+        pppanel.TextEntry = textEntry
+        textEntry:SetSize(entryW, ScreenScale(14))
+        textEntry:SetPos(layout.ctrlX + layout.ctrlW - entryW, ctrlY - textEntry:GetTall() * 0.5)
         textEntry:SetText(convar:GetString())
         textEntry:SetUpdateOnType(true) 
         textEntry:SetFont('ZCity_Tiny')
         
     
         textEntry.Paint = function(self, w, h)
-            surface.SetDrawColor(30, 30, 30, 255)
-            surface.DrawRect(0, 0, w, h)
-            surface.SetDrawColor(60, 60, 60, 255)
-            surface.DrawOutlinedRect(0, 0, w, h)
-            
-            self:DrawTextEntryText(color_white, clr_8, color_white)
+            draw.RoundedBox(0, 0, 0, w, h, Color(40, 40, 45, 220))
+            surface.SetDrawColor(90, 90, 95, 180)
+            surface.DrawOutlinedRect(0, 0, w, h, 1)
+            self:DrawTextEntryText(clr_text, clr_hover, color_white)
         end
         
         function textEntry:OnValueChange(val)
@@ -312,40 +571,86 @@ end
 
 function hg.DrawSettings(ParentPanel)
     ParentPanel:SetAlpha(0)
-    ParentPanel.Paint = function(self,w,h)
-
-        surface.SetDrawColor(28,28,28,255)
-        surface.DrawRect(0, 0, w, h)
-
-        surface.SetDrawColor(107, 107, 107,20)
-
-        for i = 1, (ybars + 1) do
-            surface.DrawRect((sw / ybars) * i - (CurTime() * 30 % (sw / ybars)), 0, ScreenScale(1), sh)
-        end
-
-        for i = 1, (xbars + 1) do
-            surface.DrawRect(0, (sh / xbars) * (i - 1) + (CurTime() * 30 % (sh / xbars)), sw, ScreenScale(1))
-        end
-
-        local border_size = ScreenScale(2)
-
-        surface.SetDrawColor(0, 0, 0)
-        surface.SetMaterial(gradient_l)
-        surface.DrawTexturedRect(0, 0, border_size, sh)
-		surface.SetMaterial(blur)
-        surface.SetDrawColor(28,28,28,208)
-        surface.DrawRect(0, 0, w, h)
+    if ParentPanel.SetDraggable then
+        ParentPanel:SetDraggable(false)
     end
-    hg.DrawBlur(ParentPanel, 5)
-    ParentPanel:AlphaTo(255,0.15,0)
-    local pppanel3 = vgui.Create('DScrollPanel', ParentPanel)
-    pppanel3:SetSize(ParentPanel:GetWide(), ParentPanel:GetTall())
-    pppanel3:SetPos(0,0)
-    --pppanel3:SetAlpha(0)
-    pppanel3.Paint = function()end
-    -- 🥴 <- лучший смайлик
 
-    local yOffset = pppanel3:GetTall()/100
+    ParentPanel.Paint = function(self, w, h)
+        draw.RoundedBox(0, 0, 0, w, h, clr_bg)
+        hg.DrawBlur(self, 5)
+
+        local gridSize = ScreenScale(25)
+        local gridSpeed = 12
+        local gridTime = RealTime() * gridSpeed
+        local gridAlpha = 12
+        local offset = gridTime % gridSize
+
+        surface.SetDrawColor(200, 200, 200, gridAlpha)
+        for i = -1, math.ceil(w / gridSize) + 1 do
+            local x = i * gridSize - offset
+            surface.DrawRect(x, 0, 1, h)
+        end
+        for i = -1, math.ceil(h / gridSize) + 1 do
+            local y = i * gridSize + offset
+            surface.DrawRect(0, y, w, 1)
+        end
+
+        surface.SetDrawColor(clr_bg)
+        surface.SetTexture(gradient_l_tex)
+        surface.DrawTexturedRect(0, 0, w, h)
+
+        surface.SetDrawColor(60, 60, 60, 30)
+        surface.SetTexture(gradient_d)
+        surface.DrawTexturedRect(0, 0, w, h)
+    end
+    ParentPanel:AlphaTo(255, 0.15, 0)
+
+    local dockW = math.max(ScrW() * 0.42, 520)
+    local headerH = ScreenScaleH(70)
+
+    local header = vgui.Create("DPanel", ParentPanel)
+    header:SetSize(dockW, headerH)
+    header:SetPos(settings_dock_x, ScrH() * 0.08)
+    header:SetMouseInputEnabled(false)
+    header.Paint = function(s, w, h)
+        local title = "Настройки"
+        local x, y = settings_pad_l, h * 0.5
+        local t = RealTime() * 4
+
+        surface.SetFont("ZC_Settings_Title")
+        draw.SimpleText(title, "ZC_Settings_Title", x + 2, y + 2, Color(0, 0, 0, 150), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+
+        local chars = GetTextChars(title)
+        local accumulatedW = 0
+        for i, char in ipairs(chars) do
+            local shimmer = (math.sin(t - i * 0.4) + 1) * 0.5
+            local col = Color(100, 100, 100):Lerp(Color(255, 255, 255), shimmer)
+            
+            draw.SimpleText(char, "ZC_Settings_Title", x + accumulatedW, y, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+            
+            local currentStr = table.concat(chars, "", 1, i)
+            accumulatedW = surface.GetTextSize(currentStr)
+        end
+    end
+
+    local pppanel3 = vgui.Create("DScrollPanel", ParentPanel)
+    pppanel3:SetSize(dockW, ScrH() * 0.72)
+    pppanel3:SetPos(settings_dock_x, header:GetY() + headerH + ScreenScaleH(8))
+    pppanel3.Paint = function() end
+
+    local vbar = pppanel3:GetVBar()
+    vbar:SetWide(ScreenScale(4))
+    vbar.Paint = function(s, w, h)
+        draw.RoundedBox(0, 0, 0, w, h, Color(66, 66, 66, 131))
+    end
+    vbar.btnUp.Paint = function() end
+    vbar.btnDown.Paint = function() end
+    vbar.btnGrip.Paint = function(s, w, h)
+        local col = s:IsHovered() and clr_hover or Color(120, 120, 125, 150)
+        draw.RoundedBox(0, 0, 0, w, h, col)
+    end
+
+    local yOffset = ScreenScaleH(4)
 
     for categoryName, categoryTable in pairs(hg.settings.tbl) do
         local category = hg.CreateCategory(categoryName, pppanel3, yOffset)
